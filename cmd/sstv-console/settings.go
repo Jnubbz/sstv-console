@@ -22,6 +22,7 @@ type Settings struct {
 	TopColor    string `json:"topColor"` // text colours, #RRGGBB
 	BottomColor string `json:"bottomColor"`
 	MsgColor    string `json:"msgColor"`
+	PhotoView   string `json:"photoView"` // how my photo is framed (the page's own JSON)
 	NoTextBar   bool   `json:"noTextBar"` // leave out the dark bar behind the text
 }
 

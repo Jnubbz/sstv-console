@@ -357,6 +357,19 @@ let tpl = "cq";
 let stationSet = false; // the station fields were filled from the settings
 let player = null;      // the <audio> playing a transmission
 let theirs = null;      // replying: the picture I received from them
+const view = { zoom: 1, x: 0, y: 0, bright: 1, contrast: 1 }; // how my photo is framed: x, y from -1 to 1
+
+function showView() {
+  $("pv-zoom").value = Math.round(view.zoom * 100); $("pv-bright").value = Math.round(view.bright * 100); $("pv-contrast").value = Math.round(view.contrast * 100);
+}
+let viewTimer = 0;
+function viewChanged() {
+  draw();
+  clearTimeout(viewTimer); // save once the dragging stops
+  viewTimer = setTimeout(() => saveStation({ PhotoView: JSON.stringify(view) }), 600);
+}
+function resetView() { Object.assign(view, { zoom: 1, x: 0, y: 0, bright: 1, contrast: 1 }); showView(); }
+const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const colors = [["#FFFFFF", "White"], ["#FFE45C", "Yellow"], ["#FF9F1C", "Orange"], ["#FF4D4D", "Red"], ["#FF5CD6", "Pink"], ["#5CFF7A", "Green"], ["#5CE1FF", "Cyan"], ["#6E9BFF", "Blue"]];
 const look = { top: "#FFFFFF", bottom: "#FFE45C", msg: "#FFFFFF", bar: true };
 
@@ -385,6 +398,12 @@ function renderStation(s) {
     look.top = s.settings.topColor; look.bottom = s.settings.bottomColor; look.msg = s.settings.msgColor; look.bar = !s.settings.noTextBar;
     swatches("sw-top", "top", "TopColor"); swatches("sw-bottom", "bottom", "BottomColor"); swatches("sw-msg", "msg", "MsgColor"); markSwatches();
     $("tx-msgtext").addEventListener("input", draw);
+    try {
+      const v = JSON.parse(s.settings.photoView || "{}");
+      view.zoom = clampN(Number(v.zoom) || 1, 1, 4); view.x = clampN(Number(v.x) || 0, -1, 1); view.y = clampN(Number(v.y) || 0, -1, 1);
+      view.bright = clampN(Number(v.bright) || 1, 0.5, 1.5); view.contrast = clampN(Number(v.contrast) || 1, 0.5, 1.5);
+    } catch { /* keep the defaults */ }
+    showView();
     $("tx-textbar").checked = look.bar;
     $("tx-textbar").addEventListener("change", () => { look.bar = $("tx-textbar").checked; draw(); saveStation({ NoTextBar: !look.bar }); });
     if (!canSink) $("out-msg").textContent = "This system can't choose an output from inside the app: transmit audio plays on the computer's current sound output. Set that to the radio before transmitting.";
@@ -473,9 +492,15 @@ function draw() {
   const m = last.modes.find((x) => x.name === $("tx-mode").value) || last.modes[0];
   const cv = $("tx-canvas"), g = cv.getContext("2d");
   cv.width = m.w; cv.height = m.h;
-  if (photo) { // fill the frame, cropping the overflow
-    const k = Math.max(m.w / photo.width, m.h / photo.height), w = photo.width * k, h = photo.height * k;
-    g.drawImage(photo, (m.w - w) / 2, (m.h - h) / 2, w, h);
+  if (photo) { // fill the frame, cropping the overflow; zoom and position are the user's
+    const k = Math.max(m.w / photo.width, m.h / photo.height) * view.zoom, w = photo.width * k, h = photo.height * k;
+    g.drawImage(photo, (m.w - w) * (0.5 + view.x / 2), (m.h - h) * (0.5 + view.y / 2), w, h);
+    if (view.bright !== 1 || view.contrast !== 1) {
+      const px = g.getImageData(0, 0, m.w, m.h), d = px.data, lut = new Uint8ClampedArray(256);
+      for (let i = 0; i < 256; i++) lut[i] = ((i - 128) * view.contrast + 128) * view.bright;
+      for (let i = 0; i < d.length; i += 4) { d[i] = lut[d[i]]; d[i + 1] = lut[d[i + 1]]; d[i + 2] = lut[d[i + 2]]; }
+      g.putImageData(px, 0, 0);
+    }
   } else {
     const bg = g.createLinearGradient(0, 0, 0, m.h);
     bg.addColorStop(0, "#1B3A6B"); bg.addColorStop(1, "#0A1830");
@@ -530,11 +555,38 @@ $("tx-file").addEventListener("change", async () => {
   const f = $("tx-file").files[0];
   if (!f) return;
   const img = new Image();
-  img.onload = () => { photo = img; draw(); };
+  img.onload = () => { photo = img; resetView(); viewChanged(); };
   img.onerror = () => { $("tx-msg").className = "small err"; $("tx-msg").textContent = "That file isn't a JPEG or PNG picture."; };
   img.src = URL.createObjectURL(f);
   api("/api/tx/photo", "POST", await f.arrayBuffer()).catch((e) => { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; });
 });
+
+// framing the photo: drag to move, wheel or slider to zoom
+{
+  const cv = $("tx-canvas");
+  let from = null;
+  cv.addEventListener("pointerdown", (e) => { if (!photo) return; from = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; cv.setPointerCapture(e.pointerId); cv.classList.add("dragging"); });
+  cv.addEventListener("pointermove", (e) => {
+    if (!from || !photo) return;
+    const scale = cv.width / cv.clientWidth; // screen pixels to picture pixels
+    const k = Math.max(cv.width / photo.width, cv.height / photo.height) * view.zoom;
+    const spareX = cv.width - photo.width * k, spareY = cv.height - photo.height * k; // negative: how far it can slide
+    if (spareX < -0.5) view.x = clampN(from.vx + 2 * (e.clientX - from.x) * scale / spareX, -1, 1);
+    if (spareY < -0.5) view.y = clampN(from.vy + 2 * (e.clientY - from.y) * scale / spareY, -1, 1);
+    viewChanged();
+  });
+  const end = () => { from = null; cv.classList.remove("dragging"); };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  cv.addEventListener("wheel", (e) => {
+    if (!photo) return;
+    e.preventDefault();
+    view.zoom = clampN(view.zoom * (e.deltaY < 0 ? 1.06 : 1 / 1.06), 1, 4); showView(); viewChanged();
+  }, { passive: false });
+  $("pv-zoom").addEventListener("input", () => { view.zoom = $("pv-zoom").value / 100; viewChanged(); });
+  $("pv-bright").addEventListener("input", () => { view.bright = $("pv-bright").value / 100; viewChanged(); });
+  $("pv-contrast").addEventListener("input", () => { view.contrast = $("pv-contrast").value / 100; viewChanged(); });
+  $("pv-reset").addEventListener("click", () => { resetView(); viewChanged(); });
+}
 
 function openComposer(to, mode, t, pic) {
   theirs = null; $("tx-inset").checked = false; $("tx-inset-row").hidden = !pic;

@@ -272,6 +272,7 @@ func (a *App) handler() http.Handler {
 		var req struct {
 			MyCall, MyGrid, OutDevice, OutLabel *string
 			TopColor, BottomColor, MsgColor     *string
+			PhotoView                           *string
 			TxLevel                             *int
 			NoTextBar                           *bool
 		}
@@ -300,6 +301,9 @@ func (a *App) handler() http.Handler {
 			}
 			if req.MsgColor != nil && isColor(*req.MsgColor) {
 				s.MsgColor = *req.MsgColor
+			}
+			if req.PhotoView != nil && len(*req.PhotoView) <= 200 && json.Valid([]byte(*req.PhotoView)) {
+				s.PhotoView = *req.PhotoView
 			}
 			if req.NoTextBar != nil {
 				s.NoTextBar = *req.NoTextBar

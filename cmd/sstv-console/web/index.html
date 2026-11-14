@@ -132,6 +132,13 @@
         <canvas id="tx-canvas" width="320" height="256" aria-label="The picture that will be sent"></canvas>
         <div class="progress" aria-hidden="true"><div id="tx-bar"></div></div>
         <p id="tx-msg" class="small muted"></p>
+        <div class="adjust">
+          <p class="small muted">Drag the photo to move it. Scroll over it, or use Zoom, to crop.</p>
+          <label class="field">Zoom <input id="pv-zoom" type="range" min="100" max="400" value="100"></label>
+          <label class="field">Brightness <input id="pv-bright" type="range" min="50" max="150" value="100"></label>
+          <label class="field">Contrast <input id="pv-contrast" type="range" min="50" max="150" value="100"></label>
+          <button id="pv-reset" class="btn">Reset photo</button>
+        </div>
       </div>
       <div class="composer-form">
         <div class="row" role="group" aria-label="What to say">

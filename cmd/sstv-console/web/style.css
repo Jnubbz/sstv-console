@@ -156,3 +156,9 @@ html, body { height: 100%; overflow: hidden; }
 }
 
 textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; resize: vertical; min-height: 64px; }
+
+/* photo framing */
+.adjust { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.adjust .btn { align-self: flex-start; }
+#tx-canvas { cursor: grab; touch-action: none; }
+#tx-canvas.dragging { cursor: grabbing; }
