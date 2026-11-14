@@ -32,9 +32,12 @@ Early days. In place now:
 - [x] Radio panel: pick the radio's sound input, connect CAT (frequency and mode in the top bar)
 - [x] Live receive: waterfall, the picture as it arrives, finished pictures saved to
       `Pictures/SSTV Console` and listed
-- [ ] Inbox and conversation threads, with the callsign read from the FSK ID or the picture
-- [ ] Quick replies: templates with callsign, RST and name filled in
-- [ ] SSTV transmit and FT-710 rig control
+- [x] Band buttons: one click to each band's SSTV frequency and sideband
+- [x] Locks onto a picture already under way (no start tones needed)
+- [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
+      CAT with a watchdog; sent pictures are listed with the received ones
+- [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
+- [ ] PD50 / PD90 / PD160 / PD290
 
 ## How updates work
 

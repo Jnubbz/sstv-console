@@ -13,6 +13,12 @@ type Settings struct {
 	RigBaud     int    `json:"rigBaud"`     // CAT RATE on the radio
 	AudioDevice string `json:"audioDevice"` // the browser's id for the sound input
 	AudioLabel  string `json:"audioLabel"`
+	OutDevice   string `json:"outDevice"` // the sound output that feeds the radio
+	OutLabel    string `json:"outLabel"`
+	TxLevel     int    `json:"txLevel"` // 1..100
+	TxMode      string `json:"txMode"`
+	MyCall      string `json:"myCall"`
+	MyGrid      string `json:"myGrid"`
 }
 
 type settingsStore struct {
@@ -38,6 +44,12 @@ func loadSettings(dir string) *settingsStore {
 	}
 	if st.s.RigBaud == 0 {
 		st.s.RigBaud = 38400
+	}
+	if st.s.TxLevel < 1 || st.s.TxLevel > 100 {
+		st.s.TxLevel = 50
+	}
+	if st.s.TxMode == "" {
+		st.s.TxMode = "Scottie 1"
 	}
 	return st
 }

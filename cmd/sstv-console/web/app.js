@@ -140,7 +140,7 @@ function renderRadio(s) {
     el.classList.toggle("on", on); el.setAttribute("aria-pressed", String(on));
   }
   if (!rig.connected) $("band-msg").textContent = "";
-  const state = !rx.audio ? ["pill-idle", "dot-off", "No audio"] : rx.receiving ? ["pill-busy", "dot-on", "Receiving " + rx.mode] : ["pill-rx", "dot-on", "Listening"];
+  const state = s.tx.keyed ? ["pill-tx", "dot-tx", "Transmitting " + s.tx.mode] : !rx.audio ? ["pill-idle", "dot-off", "No audio"] : rx.receiving ? ["pill-busy", "dot-on", "Receiving " + rx.mode] : ["pill-rx", "dot-on", "Listening"];
   $("rx-pill").className = "pill " + state[0];
   $("rx-dot").className = "dot " + state[1];
   $("rx-text").textContent = state[2];
@@ -157,6 +157,7 @@ function renderRadio(s) {
   $("rec-btn").disabled = !rx.audio || rx.recording > 0;
   if (rx.recording > 0) $("rec-msg").textContent = `Recording… ${rx.recording} s left`;
   else if (rx.recorded) $("rec-msg").textContent = "Saved: " + rx.recorded;
+  renderStation(s);
   $("rig-btn").textContent = rig.connected ? "Disconnect" : "Connect";
   if (rig.connected) { $("rig-msg").className = "small " + (rig.error ? "err" : "muted"); $("rig-msg").textContent = rig.error || `Connected to the ${rig.model}.`; }
 
@@ -185,7 +186,7 @@ function renderRadio(s) {
   $("rx-reset").disabled = !rx.receiving;
 
   if (rx.picturesV !== picsV) { picsV = rx.picturesV; loadPictures(true); }
-  if (!selected) {
+  if (!selected && $("composer").hidden) {
     $("hello-title").textContent = rx.audio ? "Listening" : "Connect your radio";
     $("hello-text").textContent = rx.audio ? "Pictures decode on their own when a station sends one. Tune to an SSTV frequency and wait for one to start."
       : "Open Radio and turn on audio. Pictures decode on their own when a station sends one.";
@@ -265,6 +266,7 @@ async function startAudio(deviceId, quiet) {
     const used = stream.getAudioTracks()[0];
     const id = deviceId || used.getSettings().deviceId || "";
     await listInputs(id);
+    listOutputs();
     $("audio-btn").textContent = "Turn off audio";
     msg.className = "small muted"; msg.textContent = "Audio is on.";
     api("/api/settings/audio", "POST", { ID: id, Label: used.label || "" }).catch(() => {});
@@ -317,8 +319,9 @@ function when(iso) {
 }
 
 function show(p) {
-  selected = p.id;
-  $("viewer-empty").hidden = true; $("viewer").hidden = false;
+  selected = p.id; shown = p;
+  $("viewer-empty").hidden = true; $("viewer").hidden = false; $("composer").hidden = true;
+  $("viewer-call").value = p.call || ""; $("reply-btn").hidden = !!p.sent;
   $("viewer-img").src = "/api/picture/" + encodeURIComponent(p.id) + ".png";
   $("viewer-img").alt = "Received picture, " + p.mode;
   $("viewer-cap").textContent = [when(p.time), p.mode, p.freqHz ? mhz(p.freqHz) + " MHz" : "", `${p.w}×${p.h}`].filter(Boolean).join(" · ");
@@ -338,11 +341,190 @@ async function loadPictures(showNewest) {
     img.src = "/api/picture/" + encodeURIComponent(p.id) + ".png"; img.alt = ""; img.loading = "lazy";
     t.className = "pic-text";
     const a = document.createElement("strong"), c = document.createElement("span");
-    a.textContent = when(p.time); c.className = "muted small"; c.textContent = [p.mode, p.freqHz ? mhz(p.freqHz) : ""].filter(Boolean).join(" · ");
+    a.textContent = p.call || when(p.time);
+    if (p.sent) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "Sent"; a.append(tag); }
+    c.className = "muted small"; c.textContent = [p.call ? when(p.time) : "", p.mode, p.freqHz ? mhz(p.freqHz) : ""].filter(Boolean).join(" · ");
     t.append(a, c); b.append(img, t); b.addEventListener("click", () => show(p)); li.append(b); ul.append(li);
   }
-  if (showNewest && list.length && picsV > 0) show(list[0]); // a picture just arrived
+  if (showNewest && list.length && picsV > 0 && $("composer").hidden) show(list[0]); // a picture just arrived
 }
+
+// ---- sending ----
+
+let shown = null;       // the picture in the viewer
+let photo = null;       // my photo, behind the text
+let tpl = "cq";
+let stationSet = false; // the station fields were filled from the settings
+let player = null;      // the <audio> playing a transmission
+const canSink = "setSinkId" in HTMLMediaElement.prototype;
+
+function renderStation(s) {
+  if (!stationSet) {
+    stationSet = true;
+    $("my-call").value = s.settings.myCall; $("my-grid").value = s.settings.myGrid;
+    $("tx-level").value = s.settings.txLevel; $("tx-level-n").textContent = s.settings.txLevel + "%";
+    const m = $("tx-mode");
+    for (const x of s.modes) m.add(new Option(`${x.name} (${Math.floor(x.seconds / 60)}:${String(Math.round(x.seconds % 60)).padStart(2, "0")})`, x.name));
+    m.value = s.settings.txMode;
+    if (!canSink) $("out-msg").textContent = "This system can't choose an output from inside the app: transmit audio plays on the computer's current sound output. Set that to the radio before transmitting.";
+    listOutputs(s.settings.outDevice);
+    const img = new Image();
+    img.onload = () => { photo = img; draw(); };
+    img.src = "/api/tx/photo";
+    setTemplate("cq");
+  }
+  const t = s.tx;
+  $("tx-go").disabled = t.keyed; $("tx-stop").disabled = !t.keyed;
+  if (t.keyed) {
+    $("tx-bar").style.width = Math.min(100, 100 * t.elapsed / t.seconds) + "%";
+    $("tx-msg").className = "small muted";
+    $("tx-msg").textContent = `Transmitting ${t.mode}: ${Math.max(0, Math.round(t.seconds - t.elapsed))} s left` + (t.ptt ? "" : " (no radio connected: audio only, nothing is keyed)");
+  } else if (!player) $("tx-bar").style.width = "0";
+  if (t.error) { $("tx-msg").className = "small err"; $("tx-msg").textContent = t.error; }
+}
+
+async function listOutputs(keep) {
+  if (!navigator.mediaDevices) return;
+  const outs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput" && d.deviceId !== "default" && d.deviceId !== "communications" && d.label);
+  const sel = $("out-dev");
+  const before = keep !== undefined ? keep : sel.value;
+  sel.replaceChildren();
+  if (!canSink) { sel.add(new Option("The computer's current output", "")); sel.disabled = true; return; }
+  sel.add(new Option(outs.length ? "Pick the radio's output…" : "Turn on audio to list outputs", ""));
+  for (const d of outs) sel.add(new Option(d.label, d.deviceId));
+  if (before && outs.some((d) => d.deviceId === before)) sel.value = before;
+  else if (before && last && last.settings.outLabel) { sel.add(new Option(last.settings.outLabel, before)); sel.value = before; }
+  $("out-pick").hidden = outs.length > 0 || !navigator.mediaDevices.selectAudioOutput;
+}
+
+function saveStation(more) {
+  return api("/api/settings/station", "POST", { MyCall: $("my-call").value, MyGrid: $("my-grid").value, ...more }).then((s) => { last = s; }).catch(() => {});
+}
+for (const id of ["my-call", "my-grid"]) $(id).addEventListener("change", () => saveStation().then(() => { setTemplate(tpl); }));
+$("out-dev").addEventListener("change", () => { const o = $("out-dev").selectedOptions[0]; saveStation({ OutDevice: o.value, OutLabel: o.value ? o.textContent : "" }); });
+$("out-pick").addEventListener("click", async () => {
+  try {
+    const d = await navigator.mediaDevices.selectAudioOutput();
+    await saveStation({ OutDevice: d.deviceId, OutLabel: d.label });
+    listOutputs(d.deviceId);
+  } catch { /* cancelled */ }
+});
+$("tx-level").addEventListener("input", () => { $("tx-level-n").textContent = $("tx-level").value + "%"; if (player) player.volume = $("tx-level").value / 100; });
+$("tx-level").addEventListener("change", () => saveStation({ TxLevel: Number($("tx-level").value) }));
+
+// the output for a transmission, or an error saying what to do
+async function route(el) {
+  el.volume = $("tx-level").value / 100;
+  if (!canSink) return;
+  const id = $("out-dev").value;
+  if (!id) { toggleRadio(true); throw new Error("Pick the output that feeds the radio first (Radio, step 3), so the picture doesn't play through your speakers."); }
+  await el.setSinkId(id);
+}
+
+$("tone-btn").addEventListener("click", async () => {
+  const rate = 48000, n = rate * 1.5, b = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); b.setUint32(4, 36 + n * 2, true); str(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, rate, true); b.setUint32(28, rate * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); str(36, "data"); b.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) b.setInt16(44 + i * 2, 0.8 * 32767 * Math.sin(2 * Math.PI * 1500 * i / rate), true);
+  const el = new Audio(URL.createObjectURL(new Blob([b], { type: "audio/wav" })));
+  try { await route(el); await el.play(); $("out-msg").className = "small muted"; $("out-msg").textContent = "Playing a 1500 Hz tone on the chosen output. The radio is not keyed."; }
+  catch (e) { $("out-msg").className = "small err"; $("out-msg").textContent = e.message; }
+});
+
+function setTemplate(t) {
+  tpl = t;
+  for (const c of document.querySelectorAll(".chip")) c.classList.toggle("on", c.dataset.tpl === t);
+  const me = $("my-call").value.toUpperCase() || "MYCALL", to = $("tx-to").value.toUpperCase() || "CALL", grid = $("my-grid").value.toUpperCase();
+  if (t === "cq") { $("tx-top").value = "CQ SSTV"; $("tx-bottom").value = [me, grid].filter(Boolean).join("  "); }
+  if (t === "reply") { $("tx-top").value = `${to} de ${me}`; $("tx-bottom").value = `UR ${$("tx-rst").value || "595"}`; }
+  if (t === "73") { $("tx-top").value = `${to} de ${me}`; $("tx-bottom").value = "TNX  73"; }
+  draw();
+}
+for (const c of document.querySelectorAll(".chip")) c.addEventListener("click", () => setTemplate(c.dataset.tpl));
+for (const id of ["tx-to", "tx-rst"]) $(id).addEventListener("input", () => setTemplate(tpl));
+for (const id of ["tx-top", "tx-bottom"]) $(id).addEventListener("input", () => { tpl = "custom"; for (const c of document.querySelectorAll(".chip")) c.classList.toggle("on", c.dataset.tpl === "custom"); draw(); });
+$("tx-mode").addEventListener("change", draw);
+
+// draw the picture exactly as it will be sent, at the mode's size
+function draw() {
+  if (!last) return;
+  const m = last.modes.find((x) => x.name === $("tx-mode").value) || last.modes[0];
+  const cv = $("tx-canvas"), g = cv.getContext("2d");
+  cv.width = m.w; cv.height = m.h;
+  if (photo) { // fill the frame, cropping the overflow
+    const k = Math.max(m.w / photo.width, m.h / photo.height), w = photo.width * k, h = photo.height * k;
+    g.drawImage(photo, (m.w - w) / 2, (m.h - h) / 2, w, h);
+  } else {
+    const bg = g.createLinearGradient(0, 0, 0, m.h);
+    bg.addColorStop(0, "#1B3A6B"); bg.addColorStop(1, "#0A1830");
+    g.fillStyle = bg; g.fillRect(0, 0, m.w, m.h);
+  }
+  const line = (text, y, base, color) => {
+    if (!text) return;
+    let px = Math.round(m.h * 0.125);
+    do { g.font = `800 ${px}px Arial, Helvetica, sans-serif`; px -= 1; } while (g.measureText(text).width > m.w * 0.94 && px > 8);
+    g.textAlign = "center"; g.textBaseline = base; g.lineJoin = "round";
+    g.lineWidth = Math.max(3, px / 5); g.strokeStyle = "#000"; g.strokeText(text, m.w / 2, y);
+    g.fillStyle = color; g.fillText(text, m.w / 2, y);
+  };
+  line($("tx-top").value, m.h * 0.04, "top", "#FFFFFF");
+  line($("tx-bottom").value, m.h * 0.96, "bottom", "#FFE45C");
+}
+
+$("tx-file").addEventListener("change", async () => {
+  const f = $("tx-file").files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { photo = img; draw(); };
+  img.onerror = () => { $("tx-msg").className = "small err"; $("tx-msg").textContent = "That file isn't a JPEG or PNG picture."; };
+  img.src = URL.createObjectURL(f);
+  api("/api/tx/photo", "POST", await f.arrayBuffer()).catch((e) => { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; });
+});
+
+function openComposer(to, mode, t) {
+  selected = ""; shown = null;
+  $("viewer").hidden = true; $("viewer-empty").hidden = true; $("composer").hidden = false;
+  for (const b of document.querySelectorAll(".pic")) b.classList.remove("on");
+  $("tx-to").value = to || "";
+  if (mode && [...$("tx-mode").options].some((o) => o.value === mode)) $("tx-mode").value = mode;
+  setTemplate(t);
+}
+$("compose-btn").addEventListener("click", () => openComposer("", "", "cq"));
+$("reply-btn").addEventListener("click", () => openComposer($("viewer-call").value, shown && shown.mode, "reply"));
+$("viewer-call").addEventListener("change", () => {
+  if (!shown) return;
+  shown.call = $("viewer-call").value.toUpperCase();
+  api("/api/picture/call", "POST", { ID: shown.id, Call: shown.call }).catch(() => {});
+});
+
+async function stopTx(stopped) {
+  if (player) { player.pause(); player = null; }
+  try { render(await api("/api/tx/unkey" + (stopped ? "?stopped=1" : ""), "POST")); } catch { /* the engine's watchdog unkeys */ }
+}
+
+$("tx-go").addEventListener("click", async () => {
+  const msg = $("tx-msg");
+  const say = (t, bad) => { msg.className = "small " + (bad ? "err" : "muted"); msg.textContent = t; };
+  if (!$("my-call").value) { toggleRadio(true); return say("Enter your callsign first (Radio, step 3): it has to be on what you send.", true); }
+  $("tx-go").disabled = true;
+  try {
+    say("Getting the picture ready…");
+    const blob = await new Promise((r) => $("tx-canvas").toBlob(r, "image/png"));
+    const to = tpl === "cq" ? "" : $("tx-to").value;
+    const p = await api(`/api/tx/prepare?mode=${encodeURIComponent($("tx-mode").value)}&to=${encodeURIComponent(to)}`, "POST", await blob.arrayBuffer());
+    const el = new Audio(`/api/tx/audio.wav?id=${p.id}`);
+    el.preload = "auto";
+    await route(el);
+    await new Promise((ok, bad) => { el.oncanplaythrough = ok; el.onerror = () => bad(new Error("couldn't load the audio")); el.load(); });
+    render(await api(`/api/tx/key?id=${p.id}`, "POST")); // the radio is transmitting from here
+    player = el;
+    el.onended = () => { if (player === el) stopTx(false); };
+    try { await el.play(); } catch (e) { await stopTx(true); throw new Error("couldn't play the audio: " + e.message); }
+  } catch (e) { say(e.message, true); $("tx-go").disabled = false; }
+});
+$("tx-stop").addEventListener("click", () => stopTx(true));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && last && last.tx.keyed) stopTx(true); });
 
 // waterfall: 1000 to 2500 Hz, newest at the top
 const wf = $("waterfall"), wctx = wf.getContext("2d");

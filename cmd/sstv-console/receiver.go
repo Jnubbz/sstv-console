@@ -31,6 +31,8 @@ type Picture struct {
 	Synced int     `json:"synced"`
 	W      int     `json:"w"`
 	H      int     `json:"h"`
+	Sent   bool    `json:"sent,omitempty"` // one of mine
+	Call   string  `json:"call,omitempty"` // the other station
 }
 
 type rxStatus struct {
@@ -73,7 +75,8 @@ type receiver struct {
 	rec       []int16 // a test recording in progress
 	recLeft   int     // samples still to record
 	recRate   int
-	freq      func() int // the radio's frequency now (0 if unknown)
+	muted     func() bool // transmitting: don't decode my own picture
+	freq      func() int  // the radio's frequency now (0 if unknown)
 	now       func() time.Time
 }
 
@@ -157,6 +160,9 @@ func (r *receiver) push(samples []float32, rate int) {
 		r.st.Receiving = false
 	}
 	r.lastAudio = time.Now()
+	if r.muted != nil && r.muted() {
+		return
+	}
 	if dumpAudio != nil { // SSTV_DUMP_AUDIO=file: raw float32 of exactly what arrived, for debugging
 		binary.Write(dumpAudio, binary.LittleEndian, samples)
 	}
@@ -216,6 +222,49 @@ func clone(img *image.RGBA) *image.RGBA {
 	return c
 }
 
+// setCall tags a picture with the other station's callsign.
+func (r *receiver) setCall(id, call string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.pics {
+		if r.pics[i].ID == id {
+			r.pics[i].Call = call
+			r.st.PicturesV++
+			r.writeIndex()
+			return true
+		}
+	}
+	return false
+}
+
+// addSent saves and lists a picture I sent.
+func (r *receiver) addSent(pic []byte, m *sstv.Mode, to string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t := r.now().UTC()
+	hz := r.freq()
+	id := t.Format("2006-01-02 150405") + "Z Sent " + m.Name
+	if hz > 0 {
+		id += fmt.Sprintf(" %d kHz", hz/1000)
+	}
+	if err := os.WriteFile(r.file(id), pic, 0o644); err != nil {
+		r.st.Note = "Couldn't save the sent picture: " + err.Error()
+		return
+	}
+	r.pics = append([]Picture{{ID: id, Time: t.Format(time.RFC3339), Mode: m.Name, FreqHz: hz, W: m.Width, H: m.Height,
+		Sent: true, Call: to}}, r.pics...)
+	r.st.PicturesV++
+	r.writeIndex()
+}
+
+func (r *receiver) writeIndex() {
+	b, _ := json.MarshalIndent(r.pics, "", " ")
+	tmp := r.indexPath + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, r.indexPath)
+	}
+}
+
 // save writes a finished picture and lists it. Called with the lock held.
 func (r *receiver) save(e sstv.Event) {
 	t := r.now().UTC()
@@ -247,11 +296,7 @@ func (r *receiver) save(e sstv.Event) {
 		Slant: math.Round(e.SlantPPM), Synced: e.Synced, W: e.Image.Bounds().Dx(), H: e.Image.Bounds().Dy()}
 	r.pics = append([]Picture{p}, r.pics...)
 	r.st.PicturesV++
-	b, _ := json.MarshalIndent(r.pics, "", " ")
-	tmp := r.indexPath + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, r.indexPath)
-	}
+	r.writeIndex()
 }
 
 // A test recording: a minute of exactly the audio the decoder is given, as a WAV file next

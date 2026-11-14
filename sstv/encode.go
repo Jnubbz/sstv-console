@@ -57,7 +57,7 @@ func (g *toneGen) scan(px []float64, dur float64) {
 }
 
 func encode(img image.Image, m *Mode, fs, off float64) []float32 {
-	pic := resize(img, m.Width, m.Height)
+	pic := Resize(img, m.Width, m.Height)
 	g := &toneGen{fs: fs, off: off}
 	// calibration header and VIS
 	g.tone(freqLead, 0.300)
@@ -182,8 +182,8 @@ func encode(img image.Image, m *Mode, fs, off float64) []float32 {
 	return g.out
 }
 
-// resize scales img to w x h (bilinear) into RGBA.
-func resize(img image.Image, w, h int) *image.RGBA {
+// Resize scales img to w x h (bilinear) into RGBA.
+func Resize(img image.Image, w, h int) *image.RGBA {
 	b := img.Bounds()
 	out := image.NewRGBA(image.Rect(0, 0, w, h))
 	sw, sh := b.Dx(), b.Dy()

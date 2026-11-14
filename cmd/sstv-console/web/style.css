@@ -110,3 +110,21 @@ canvas.waterfall { width: 100%; display: block; }
 .band { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); color: #C9D5E6; font: inherit; cursor: pointer; }
 .band:hover { border-color: #2F5FA8; }
 .band.on { border-color: var(--blue); background: var(--blue-soft); color: #fff; }
+
+/* composer */
+input:not([type]), input[type=text] { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; min-width: 0; }
+input.short { width: 110px; font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-weight: 700; text-transform: uppercase; }
+input[type=range] { accent-color: var(--blue); width: 100%; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.center { justify-content: center; }
+.composer { margin: auto; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; justify-content: center; width: 100%; max-width: 980px; }
+.composer-pic { flex: 1 1 320px; max-width: 480px; display: flex; flex-direction: column; gap: 8px; }
+.composer-pic canvas { width: 100%; border-radius: 8px; border: 2px solid var(--blue); background: #060B14; display: block; }
+.composer-form { flex: 1 1 320px; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
+.chip { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line); background: var(--raised); color: #C9D5E6; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; }
+.chip.on { border-color: var(--blue); background: var(--blue-soft); color: #fff; }
+.btn-tx { background: var(--tx); border-color: var(--tx); color: #1A1206; font-weight: 700; height: 44px; padding: 0 22px; }
+.btn-tx:disabled { opacity: .5; }
+.pill-tx { background: #3A2A0A; border: 1px solid var(--tx); color: #FCD34D; }
+.dot-tx { background: var(--tx); }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--blue-soft); color: var(--blue-text); margin-left: 6px; font-weight: 600; }
