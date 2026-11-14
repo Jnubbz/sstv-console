@@ -128,3 +128,13 @@ input[type=range] { accent-color: var(--blue); width: 100%; }
 .pill-tx { background: #3A2A0A; border: 1px solid var(--tx); color: #FCD34D; }
 .dot-tx { background: var(--tx); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--blue-soft); color: var(--blue-text); margin-left: 6px; font-weight: 600; }
+
+/* text colours */
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.sw { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+.sw.on { border-color: #fff; box-shadow: 0 0 0 2px var(--blue); }
+.sw-FFFFFF { background: #FFFFFF; } .sw-FFE45C { background: #FFE45C; } .sw-FF9F1C { background: #FF9F1C; }
+.sw-FF4D4D { background: #FF4D4D; } .sw-FF5CD6 { background: #FF5CD6; } .sw-5CFF7A { background: #5CFF7A; }
+.sw-5CE1FF { background: #5CE1FF; } .sw-6E9BFF { background: #6E9BFF; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.check input { width: 18px; height: 18px; accent-color: #3B82F6; }

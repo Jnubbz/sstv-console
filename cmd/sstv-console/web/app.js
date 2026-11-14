@@ -356,6 +356,21 @@ let photo = null;       // my photo, behind the text
 let tpl = "cq";
 let stationSet = false; // the station fields were filled from the settings
 let player = null;      // the <audio> playing a transmission
+const colors = [["#FFFFFF", "White"], ["#FFE45C", "Yellow"], ["#FF9F1C", "Orange"], ["#FF4D4D", "Red"], ["#FF5CD6", "Pink"], ["#5CFF7A", "Green"], ["#5CE1FF", "Cyan"], ["#6E9BFF", "Blue"]];
+const look = { top: "#FFFFFF", bottom: "#FFE45C", bar: true };
+
+function swatches(id, key, save) {
+  for (const [hex, name] of colors) {
+    const b = document.createElement("button");
+    b.className = "sw sw-" + hex.slice(1); b.title = name; b.setAttribute("aria-label", name); b.dataset.hex = hex;
+    b.addEventListener("click", () => { look[key] = hex; markSwatches(); draw(); saveStation({ [save]: hex }); });
+    $(id).append(b);
+  }
+}
+function markSwatches() {
+  for (const [id, key] of [["sw-top", "top"], ["sw-bottom", "bottom"]])
+    for (const b of $(id).children) { const on = b.dataset.hex === look[key]; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); }
+}
 const canSink = "setSinkId" in HTMLMediaElement.prototype;
 
 function renderStation(s) {
@@ -366,6 +381,10 @@ function renderStation(s) {
     const m = $("tx-mode");
     for (const x of s.modes) m.add(new Option(`${x.name} (${Math.floor(x.seconds / 60)}:${String(Math.round(x.seconds % 60)).padStart(2, "0")})`, x.name));
     m.value = s.settings.txMode;
+    look.top = s.settings.topColor; look.bottom = s.settings.bottomColor; look.bar = !s.settings.noTextBar;
+    swatches("sw-top", "top", "TopColor"); swatches("sw-bottom", "bottom", "BottomColor"); markSwatches();
+    $("tx-textbar").checked = look.bar;
+    $("tx-textbar").addEventListener("change", () => { look.bar = $("tx-textbar").checked; draw(); saveStation({ NoTextBar: !look.bar }); });
     if (!canSink) $("out-msg").textContent = "This system can't choose an output from inside the app: transmit audio plays on the computer's current sound output. Set that to the radio before transmitting.";
     listOutputs(s.settings.outDevice);
     const img = new Image();
@@ -460,16 +479,20 @@ function draw() {
     bg.addColorStop(0, "#1B3A6B"); bg.addColorStop(1, "#0A1830");
     g.fillStyle = bg; g.fillRect(0, 0, m.w, m.h);
   }
-  const line = (text, y, base, color) => {
+  // Each line sits on a solid dark bar: SSTV smears fine detail, so an outline alone
+  // disappears over a bright photo and the letters melt into it.
+  const line = (text, top, color) => {
     if (!text) return;
-    let px = Math.round(m.h * 0.125);
-    do { g.font = `800 ${px}px Arial, Helvetica, sans-serif`; px -= 1; } while (g.measureText(text).width > m.w * 0.94 && px > 8);
-    g.textAlign = "center"; g.textBaseline = base; g.lineJoin = "round";
-    g.lineWidth = Math.max(3, px / 5); g.strokeStyle = "#000"; g.strokeText(text, m.w / 2, y);
-    g.fillStyle = color; g.fillText(text, m.w / 2, y);
+    let px = Math.round(m.h * 0.135);
+    do { g.font = `800 ${px}px Arial, Helvetica, sans-serif`; px -= 1; } while (g.measureText(text).width > m.w * 0.92 && px > 8);
+    const bar = Math.round(px * 1.5), y = top ? 0 : m.h - bar;
+    if (look.bar) { g.fillStyle = "rgba(0, 0, 0, 0.82)"; g.fillRect(0, y, m.w, bar); }
+    g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
+    g.lineWidth = Math.max(3, px / 5); g.strokeStyle = "#000"; g.strokeText(text, m.w / 2, y + bar / 2 + px * 0.04);
+    g.fillStyle = color; g.fillText(text, m.w / 2, y + bar / 2 + px * 0.04);
   };
-  line($("tx-top").value, m.h * 0.04, "top", "#FFFFFF");
-  line($("tx-bottom").value, m.h * 0.96, "bottom", "#FFE45C");
+  line($("tx-top").value, true, look.top);
+  line($("tx-bottom").value, false, look.bottom);
 }
 
 $("tx-file").addEventListener("change", async () => {
@@ -484,6 +507,7 @@ $("tx-file").addEventListener("change", async () => {
 
 function openComposer(to, mode, t) {
   selected = ""; shown = null;
+  toggleRadio(false);
   $("viewer").hidden = true; $("viewer-empty").hidden = true; $("composer").hidden = false;
   for (const b of document.querySelectorAll(".pic")) b.classList.remove("on");
   $("tx-to").value = to || "";

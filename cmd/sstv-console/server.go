@@ -271,7 +271,9 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/station", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			MyCall, MyGrid, OutDevice, OutLabel *string
+			TopColor, BottomColor               *string
 			TxLevel                             *int
+			NoTextBar                           *bool
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -289,6 +291,15 @@ func (a *App) handler() http.Handler {
 			}
 			if req.OutLabel != nil && len(*req.OutLabel) <= 300 {
 				s.OutLabel = *req.OutLabel
+			}
+			if req.TopColor != nil && isColor(*req.TopColor) {
+				s.TopColor = *req.TopColor
+			}
+			if req.BottomColor != nil && isColor(*req.BottomColor) {
+				s.BottomColor = *req.BottomColor
+			}
+			if req.NoTextBar != nil {
+				s.NoTextBar = *req.NoTextBar
 			}
 			if req.TxLevel != nil && *req.TxLevel >= 1 && *req.TxLevel <= 100 {
 				s.TxLevel = *req.TxLevel

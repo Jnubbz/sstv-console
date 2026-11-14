@@ -19,6 +19,9 @@ type Settings struct {
 	TxMode      string `json:"txMode"`
 	MyCall      string `json:"myCall"`
 	MyGrid      string `json:"myGrid"`
+	TopColor    string `json:"topColor"` // text colours, #RRGGBB
+	BottomColor string `json:"bottomColor"`
+	NoTextBar   bool   `json:"noTextBar"` // leave out the dark bar behind the text
 }
 
 type settingsStore struct {
@@ -48,6 +51,12 @@ func loadSettings(dir string) *settingsStore {
 	if st.s.TxLevel < 1 || st.s.TxLevel > 100 {
 		st.s.TxLevel = 50
 	}
+	if !isColor(st.s.TopColor) {
+		st.s.TopColor = "#FFFFFF"
+	}
+	if !isColor(st.s.BottomColor) {
+		st.s.BottomColor = "#FFE45C"
+	}
 	if st.s.TxMode == "" {
 		st.s.TxMode = "Scottie 1"
 	}
@@ -69,4 +78,17 @@ func (st *settingsStore) update(f func(*Settings)) {
 	if os.WriteFile(tmp, b, 0o644) == nil {
 		os.Rename(tmp, st.path)
 	}
+}
+
+// isColor: "#RRGGBB".
+func isColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
