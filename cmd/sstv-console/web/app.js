@@ -356,6 +356,7 @@ let photo = null;       // my photo, behind the text
 let tpl = "cq";
 let stationSet = false; // the station fields were filled from the settings
 let player = null;      // the <audio> playing a transmission
+let theirs = null;      // replying: the picture I received from them
 const colors = [["#FFFFFF", "White"], ["#FFE45C", "Yellow"], ["#FF9F1C", "Orange"], ["#FF4D4D", "Red"], ["#FF5CD6", "Pink"], ["#5CFF7A", "Green"], ["#5CE1FF", "Cyan"], ["#6E9BFF", "Blue"]];
 const look = { top: "#FFFFFF", bottom: "#FFE45C", bar: true };
 
@@ -491,6 +492,12 @@ function draw() {
     g.lineWidth = Math.max(3, px / 5); g.strokeStyle = "#000"; g.strokeText(text, m.w / 2, y + bar / 2 + px * 0.04);
     g.fillStyle = color; g.fillText(text, m.w / 2, y + bar / 2 + px * 0.04);
   };
+  if (theirs && $("tx-inset").checked) { // their picture, bottom left, in a white frame
+    const w = Math.round(m.w * 0.3), h = Math.round(w * theirs.height / theirs.width), pad = Math.round(m.w * 0.02), b = Math.max(2, Math.round(m.w / 160));
+    const y = m.h - Math.round(m.h * 0.2) - h - pad;
+    g.fillStyle = "#FFFFFF"; g.fillRect(pad, y, w + 2 * b, h + 2 * b);
+    g.drawImage(theirs, pad + b, y + b, w, h);
+  }
   line($("tx-top").value, true, look.top);
   line($("tx-bottom").value, false, look.bottom);
 }
@@ -505,7 +512,9 @@ $("tx-file").addEventListener("change", async () => {
   api("/api/tx/photo", "POST", await f.arrayBuffer()).catch((e) => { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; });
 });
 
-function openComposer(to, mode, t) {
+function openComposer(to, mode, t, pic) {
+  theirs = null; $("tx-inset").checked = false; $("tx-inset-row").hidden = !pic;
+  if (pic) { const img = new Image(); img.onload = () => { theirs = img; draw(); }; img.src = "/api/picture/" + encodeURIComponent(pic.id) + ".png"; }
   selected = ""; shown = null;
   toggleRadio(false);
   $("viewer").hidden = true; $("viewer-empty").hidden = true; $("composer").hidden = false;
@@ -515,7 +524,8 @@ function openComposer(to, mode, t) {
   setTemplate(t);
 }
 $("compose-btn").addEventListener("click", () => openComposer("", "", "cq"));
-$("reply-btn").addEventListener("click", () => openComposer($("viewer-call").value, shown && shown.mode, "reply"));
+$("reply-btn").addEventListener("click", () => openComposer($("viewer-call").value, shown && shown.mode, "reply", shown));
+$("tx-inset").addEventListener("change", draw);
 $("viewer-call").addEventListener("change", () => {
   if (!shown) return;
   shown.call = $("viewer-call").value.toUpperCase();

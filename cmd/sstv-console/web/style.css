@@ -138,3 +138,19 @@ input[type=range] { accent-color: var(--blue); width: 100%; }
 .sw-5CE1FF { background: #5CE1FF; } .sw-6E9BFF { background: #6E9BFF; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .check input { width: 18px; height: 18px; accent-color: #3B82F6; }
+
+/* the window never grows: each pane scrolls by itself */
+html, body { height: 100%; overflow: hidden; }
+.panes { overflow: hidden; flex-wrap: nowrap; }
+.pane { min-height: 0; overflow-y: auto; }
+.inbox { overflow: hidden; }
+.pics { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.pane-head { flex-shrink: 0; }
+.radio { max-height: 55vh; overflow-y: auto; flex-shrink: 0; }
+.top, .update { flex-shrink: 0; }
+@media (max-width: 760px) { /* a narrow window stacks the panes: then the page scrolls */
+  html, body { overflow: auto; height: auto; }
+  .panes { overflow: visible; flex-wrap: wrap; }
+  .inbox { overflow: visible; }
+  .pics { max-height: 50vh; }
+}
