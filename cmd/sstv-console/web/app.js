@@ -358,7 +358,7 @@ let stationSet = false; // the station fields were filled from the settings
 let player = null;      // the <audio> playing a transmission
 let theirs = null;      // replying: the picture I received from them
 const colors = [["#FFFFFF", "White"], ["#FFE45C", "Yellow"], ["#FF9F1C", "Orange"], ["#FF4D4D", "Red"], ["#FF5CD6", "Pink"], ["#5CFF7A", "Green"], ["#5CE1FF", "Cyan"], ["#6E9BFF", "Blue"]];
-const look = { top: "#FFFFFF", bottom: "#FFE45C", bar: true };
+const look = { top: "#FFFFFF", bottom: "#FFE45C", msg: "#FFFFFF", bar: true };
 
 function swatches(id, key, save) {
   for (const [hex, name] of colors) {
@@ -369,7 +369,7 @@ function swatches(id, key, save) {
   }
 }
 function markSwatches() {
-  for (const [id, key] of [["sw-top", "top"], ["sw-bottom", "bottom"]])
+  for (const [id, key] of [["sw-top", "top"], ["sw-bottom", "bottom"], ["sw-msg", "msg"]])
     for (const b of $(id).children) { const on = b.dataset.hex === look[key]; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); }
 }
 const canSink = "setSinkId" in HTMLMediaElement.prototype;
@@ -382,8 +382,9 @@ function renderStation(s) {
     const m = $("tx-mode");
     for (const x of s.modes) m.add(new Option(`${x.name} (${Math.floor(x.seconds / 60)}:${String(Math.round(x.seconds % 60)).padStart(2, "0")})`, x.name));
     m.value = s.settings.txMode;
-    look.top = s.settings.topColor; look.bottom = s.settings.bottomColor; look.bar = !s.settings.noTextBar;
-    swatches("sw-top", "top", "TopColor"); swatches("sw-bottom", "bottom", "BottomColor"); markSwatches();
+    look.top = s.settings.topColor; look.bottom = s.settings.bottomColor; look.msg = s.settings.msgColor; look.bar = !s.settings.noTextBar;
+    swatches("sw-top", "top", "TopColor"); swatches("sw-bottom", "bottom", "BottomColor"); swatches("sw-msg", "msg", "MsgColor"); markSwatches();
+    $("tx-msgtext").addEventListener("input", draw);
     $("tx-textbar").checked = look.bar;
     $("tx-textbar").addEventListener("change", () => { look.bar = $("tx-textbar").checked; draw(); saveStation({ NoTextBar: !look.bar }); });
     if (!canSink) $("out-msg").textContent = "This system can't choose an output from inside the app: transmit audio plays on the computer's current sound output. Set that to the radio before transmitting.";
@@ -497,6 +498,29 @@ function draw() {
     const y = m.h - Math.round(m.h * 0.2) - h - pad;
     g.fillStyle = "#FFFFFF"; g.fillRect(pad, y, w + 2 * b, h + 2 * b);
     g.drawImage(theirs, pad + b, y + b, w, h);
+  }
+  // the free message: up to 4 lines under the top line, wrapped to the picture's width
+  const words = $("tx-msgtext").value.trim();
+  if (words) {
+    const px = Math.round(m.h * 0.07), max = m.w * 0.92;
+    g.font = `700 ${px}px Arial, Helvetica, sans-serif`;
+    const rows = [];
+    for (const para of words.split("\n")) {
+      let row = "";
+      for (const w of para.split(/\s+/).filter(Boolean)) {
+        const next = row ? row + " " + w : w;
+        if (row && g.measureText(next).width > max) { rows.push(row); row = w; } else row = next;
+      }
+      rows.push(row);
+    }
+    const shownRows = rows.filter(Boolean).slice(0, 4), lh = Math.round(px * 1.3);
+    let topPx = Math.round(m.h * 0.135); // the top line's bar height, as line() works it out
+    if ($("tx-top").value) { let p = topPx; do { g.font = `800 ${p}px Arial, Helvetica, sans-serif`; p -= 1; } while (g.measureText($("tx-top").value).width > m.w * 0.92 && p > 8); topPx = Math.round(p * 1.5); } else topPx = 0;
+    g.font = `700 ${px}px Arial, Helvetica, sans-serif`;
+    const y0 = topPx + Math.round(px * 0.3), h = shownRows.length * lh + Math.round(px * 0.3);
+    if (look.bar) { g.fillStyle = "rgba(0, 0, 0, 0.7)"; g.fillRect(0, topPx, m.w, h + Math.round(px * 0.3)); }
+    g.textAlign = "center"; g.textBaseline = "top"; g.lineJoin = "round"; g.lineWidth = Math.max(2, px / 5); g.strokeStyle = "#000";
+    shownRows.forEach((r, i) => { g.strokeText(r, m.w / 2, y0 + i * lh, max); g.fillStyle = look.msg; g.fillText(r, m.w / 2, y0 + i * lh, max); });
   }
   line($("tx-top").value, true, look.top);
   line($("tx-bottom").value, false, look.bottom);

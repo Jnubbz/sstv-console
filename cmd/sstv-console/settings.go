@@ -21,6 +21,7 @@ type Settings struct {
 	MyGrid      string `json:"myGrid"`
 	TopColor    string `json:"topColor"` // text colours, #RRGGBB
 	BottomColor string `json:"bottomColor"`
+	MsgColor    string `json:"msgColor"`
 	NoTextBar   bool   `json:"noTextBar"` // leave out the dark bar behind the text
 }
 
@@ -53,6 +54,9 @@ func loadSettings(dir string) *settingsStore {
 	}
 	if !isColor(st.s.TopColor) {
 		st.s.TopColor = "#FFFFFF"
+	}
+	if !isColor(st.s.MsgColor) {
+		st.s.MsgColor = "#FFFFFF"
 	}
 	if !isColor(st.s.BottomColor) {
 		st.s.BottomColor = "#FFE45C"

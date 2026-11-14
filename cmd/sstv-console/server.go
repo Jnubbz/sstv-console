@@ -271,7 +271,7 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/station", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			MyCall, MyGrid, OutDevice, OutLabel *string
-			TopColor, BottomColor               *string
+			TopColor, BottomColor, MsgColor     *string
 			TxLevel                             *int
 			NoTextBar                           *bool
 		}
@@ -297,6 +297,9 @@ func (a *App) handler() http.Handler {
 			}
 			if req.BottomColor != nil && isColor(*req.BottomColor) {
 				s.BottomColor = *req.BottomColor
+			}
+			if req.MsgColor != nil && isColor(*req.MsgColor) {
+				s.MsgColor = *req.MsgColor
 			}
 			if req.NoTextBar != nil {
 				s.NoTextBar = *req.NoTextBar

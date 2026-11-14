@@ -154,3 +154,5 @@ html, body { height: 100%; overflow: hidden; }
   .inbox { overflow: visible; }
   .pics { max-height: 50vh; }
 }
+
+textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; resize: vertical; min-height: 64px; }
