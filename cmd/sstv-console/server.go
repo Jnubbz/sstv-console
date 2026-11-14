@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/Jnubbz/sstv-console/internal/serial"
 	"github.com/Jnubbz/sstv-console/sstv"
 )
+
+func init() { _ = mime.AddExtensionType(".woff2", "font/woff2") }
 
 //go:embed web
 var webFiles embed.FS

@@ -1,3 +1,7 @@
+@font-face { font-family: "Inter"; src: url(fonts/inter-latin-wght-normal.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Inconsolata"; src: url(fonts/inconsolata-latin-400-normal.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Inconsolata"; src: url(fonts/inconsolata-latin-700-normal.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Inconsolata"; src: url(fonts/inconsolata-latin-800-normal.woff2) format("woff2"); font-weight: 800; font-display: swap; }
 :root {
   --bg: #0A101C; --panel: #0D1524; --bar: #0E1626; --raised: #111B2E; --line: #1C2A42;
   --text: #E6EDF7; --muted: #9FB0C9; --blue: #3B82F6; --blue-soft: #17305A; --blue-text: #CFE1FF;
@@ -7,7 +11,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--text); font: 14px/1.4 Inter, -apple-system, "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 Inter, -apple-system, "Segoe UI", system-ui, sans-serif; font-feature-settings: "zero" 1; display: flex; flex-direction: column; }
 h2 { margin: 0 0 12px; font-size: 15px; }
 p { margin: 0; }
 .muted { color: var(--muted); }
@@ -51,7 +55,7 @@ p { margin: 0; }
 .empty-big { margin: auto; text-align: center; max-width: 360px; border: none; display: flex; flex-direction: column; gap: 6px; }
 .lead { color: var(--text); font-size: 16px; font-weight: 600; }
 .waterfall { height: 120px; border-radius: 8px; background: #060B14; border: 1px solid var(--line); }
-.scale { display: flex; justify-content: space-between; font: 11px ui-monospace, "JetBrains Mono", Menlo, monospace; color: var(--muted); }
+.scale { display: flex; justify-content: space-between; font: 11px "Inconsolata", ui-monospace, Menlo, monospace; color: var(--muted); }
 .decode { aspect-ratio: 5 / 4; display: flex; align-items: center; justify-content: center; margin-top: 8px; }
 
 @media (max-width: 760px) { .inbox, .live { max-width: none; border: none; } }
@@ -59,7 +63,7 @@ p { margin: 0; }
 
 /* radio panel */
 button.rig { font: inherit; color: inherit; cursor: pointer; }
-.freq { font: 700 15px ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+.freq { font: 700 15px "Inconsolata", ui-monospace, Menlo, Consolas, monospace; }
 .pill-idle { background: var(--raised); border: 1px solid var(--line); color: var(--muted); }
 .pill-busy { background: var(--blue-soft); border: 1px solid #2F5FA8; color: var(--blue-text); }
 .radio { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 20px; background: var(--bar); border-bottom: 1px solid var(--line); }
@@ -113,7 +117,7 @@ canvas.waterfall { width: 100%; display: block; }
 
 /* composer */
 input:not([type]), input[type=text] { height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; min-width: 0; }
-input.short { width: 110px; font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-weight: 700; text-transform: uppercase; }
+input.short { width: 110px; font-family: "Inconsolata", ui-monospace, Menlo, Consolas, monospace; font-weight: 700; text-transform: uppercase; }
 input[type=range] { accent-color: var(--blue); width: 100%; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .center { justify-content: center; }
@@ -162,3 +166,5 @@ textarea { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
 .adjust .btn { align-self: flex-start; }
 #tx-canvas { cursor: grab; touch-action: none; }
 #tx-canvas.dragging { cursor: grabbing; }
+
+button, input, select, textarea { font-feature-settings: "zero" 1; }

@@ -511,7 +511,7 @@ function draw() {
   const line = (text, top, color) => {
     if (!text) return;
     let px = Math.round(m.h * 0.135);
-    do { g.font = `800 ${px}px Arial, Helvetica, sans-serif`; px -= 1; } while (g.measureText(text).width > m.w * 0.92 && px > 8);
+    do { g.font = `800 ${px}px Inconsolata, Menlo, Consolas, monospace`; px -= 1; } while (g.measureText(text).width > m.w * 0.92 && px > 8);
     const bar = Math.round(px * 1.5), y = top ? 0 : m.h - bar;
     if (look.bar) { g.fillStyle = "rgba(0, 0, 0, 0.82)"; g.fillRect(0, y, m.w, bar); }
     g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
@@ -528,7 +528,7 @@ function draw() {
   const words = $("tx-msgtext").value.trim();
   if (words) {
     const px = Math.round(m.h * 0.07), max = m.w * 0.92;
-    g.font = `700 ${px}px Arial, Helvetica, sans-serif`;
+    g.font = `700 ${px}px Inconsolata, Menlo, Consolas, monospace`;
     const rows = [];
     for (const para of words.split("\n")) {
       let row = "";
@@ -540,8 +540,8 @@ function draw() {
     }
     const shownRows = rows.filter(Boolean).slice(0, 4), lh = Math.round(px * 1.3);
     let topPx = Math.round(m.h * 0.135); // the top line's bar height, as line() works it out
-    if ($("tx-top").value) { let p = topPx; do { g.font = `800 ${p}px Arial, Helvetica, sans-serif`; p -= 1; } while (g.measureText($("tx-top").value).width > m.w * 0.92 && p > 8); topPx = Math.round(p * 1.5); } else topPx = 0;
-    g.font = `700 ${px}px Arial, Helvetica, sans-serif`;
+    if ($("tx-top").value) { let p = topPx; do { g.font = `800 ${p}px Inconsolata, Menlo, Consolas, monospace`; p -= 1; } while (g.measureText($("tx-top").value).width > m.w * 0.92 && p > 8); topPx = Math.round(p * 1.5); } else topPx = 0;
+    g.font = `700 ${px}px Inconsolata, Menlo, Consolas, monospace`;
     const y0 = topPx + Math.round(px * 0.3), h = shownRows.length * lh + Math.round(px * 0.3);
     if (look.bar) { g.fillStyle = "rgba(0, 0, 0, 0.7)"; g.fillRect(0, topPx, m.w, h + Math.round(px * 0.3)); }
     g.textAlign = "center"; g.textBaseline = "top"; g.lineJoin = "round"; g.lineWidth = Math.max(2, px / 5); g.strokeStyle = "#000";
@@ -657,3 +657,6 @@ setInterval(() => {
 poll();
 loadPictures(false);
 setInterval(poll, 400);
+
+// The picture text uses Inconsolata (slashed zero); redraw once the fonts are ready.
+if (document.fonts && document.fonts.load) Promise.all(["700 20px Inconsolata", "800 20px Inconsolata"].map(f => document.fonts.load(f))).then(() => draw()).catch(() => {});
