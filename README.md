@@ -11,6 +11,15 @@ same way so the two can merge into one app later.
 [Releases page](https://github.com/Jnubbz/sstv-console/releases/latest). Once installed, the
 app updates itself.
 
+## Install
+
+- **Mac (Apple Silicon):** unzip `SSTV-Console-Mac.zip`, drag *SSTV Console.app* to
+  Applications, and the first time right-click it and choose Open.
+- **Windows:** unzip `SSTV-Console-Windows.zip` somewhere you can write to (Documents or
+  the Desktop, not Program Files) and run `SSTV-Console.exe`.
+
+That's the only manual install: after that, the app updates itself.
+
 ## Status
 
 Early days. In place now:
