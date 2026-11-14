@@ -1,0 +1,50 @@
+name: Release
+
+# Every merge to main: test, build the Windows and Mac zips, sign latest.json, and publish
+# release v0.1.<run number>. Installed apps find it within 6 hours (or with About > Check
+# for updates) and offer "Install and restart".
+#
+# Needs the repository secret UPDATE_SIGNING_KEY: the Ed25519 private key (PEM) whose
+# public half is selfupdate.PublicKey. Without it the release isn't published.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest # the Mac app's window is Swift
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Version
+        run: echo "VERSION=0.1.${{ github.run_number }}" >> "$GITHUB_ENV"
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: scripts/build.sh
+      - name: Sign the manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          NOTES=$(git log -1 --format=%s)
+          go run ./internal/signmanifest -version "$VERSION" \
+            -base "https://github.com/${{ github.repository }}/releases/download/v$VERSION" \
+            -notes "$NOTES" -out dist \
+            darwin-arm64=dist/SSTV-Console-Mac.zip windows-amd64=dist/SSTV-Console-Windows.zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" dist/SSTV-Console-Mac.zip dist/SSTV-Console-Windows.zip \
+            dist/latest.json dist/latest.json.sig \
+            --title "SSTV Console $VERSION" --generate-notes --latest
