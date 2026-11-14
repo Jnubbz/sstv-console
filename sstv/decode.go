@@ -483,8 +483,9 @@ func (d *Decoder) receive(ev *[]Event) bool {
 			*ev = append(*ev, Event{Kind: Aborted, Mode: m, Joined: r.joined})
 			return true
 		}
-		// Joined partway: the picture's length isn't known, so it ends when the syncs do.
-		if r.joined && r.next-r.lastK > 20 {
+		// The picture ends when the syncs do: a transmission that stops early (or fades out
+		// for good) must not run on into noise or into the next picture.
+		if r.next-r.lastK > 20 && r.next > 20 {
 			lines = r.lastK + 1
 			break
 		}

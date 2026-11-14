@@ -263,3 +263,41 @@ func TestJoinsThroughNoise(t *testing.T) {
 	}
 	t.Logf("%d rows, %d syncs", done.Image.Bounds().Dy(), done.Synced)
 }
+
+// A transmission that stops partway, followed by a second picture: the first must end where
+// its signal did (a partial), and the second must be decoded whole on its own.
+func TestStopsEarlyThenNextPicture(t *testing.T) {
+	a, b := ByName("Scottie 1"), ByName("Martin 2")
+	full := Encode(TestCard(a.Width, a.Height), a, 48000)
+	cut := full[:len(full)*45/100]
+	rng := rand.New(rand.NewSource(3))
+	noise := make([]float32, 48000*20)
+	for i := range noise {
+		noise[i] = float32(rng.NormFloat64() * 0.25)
+	}
+	audio := pad(cut, 48000)
+	audio = append(audio, noise...)
+	audio = append(audio, pad(Encode(TestCard(b.Width, b.Height), b, 48000), 48000)...)
+	d := NewDecoder(48000)
+	type res struct {
+		name string
+		h    int
+	}
+	var got []res
+	for i := 0; i < len(audio); i += 4096 {
+		for _, e := range d.Write(audio[i:min(i+4096, len(audio))]) {
+			if e.Kind == Done {
+				got = append(got, res{e.Mode.Name, e.Image.Bounds().Dy()})
+			}
+		}
+	}
+	if len(got) != 2 || got[0].name != a.Name || got[1].name != b.Name {
+		t.Fatalf("got %v", got)
+	}
+	if got[0].h >= a.Height*3/4 || got[0].h < a.Height/4 {
+		t.Fatalf("partial picture is %d rows of %d", got[0].h, a.Height)
+	}
+	if got[1].h != b.Height {
+		t.Fatalf("second picture is %d rows, want %d", got[1].h, b.Height)
+	}
+}
