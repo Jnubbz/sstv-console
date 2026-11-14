@@ -119,6 +119,27 @@ function renderRadio(s) {
   $("rig-freq").hidden = !rig.freqHz;
   if (rig.freqHz) $("rig-freq").textContent = mhz(rig.freqHz);
   $("rig-text").textContent = rig.connected ? (rig.error || [rig.model, rig.mode].filter(Boolean).join(" · ")) : "No radio connected";
+  // band buttons: one per band, lit when the radio is on that band's SSTV frequency
+  const bands = $("bands");
+  bands.hidden = !rig.connected;
+  if (!bands.children.length) {
+    for (const b of s.bands) {
+      const el = document.createElement("button");
+      el.className = "band"; el.textContent = b.name; el.dataset.hz = b.freqHz;
+      el.title = `${mhz(b.freqHz)} ${b.lower ? "LSB" : "USB"}`;
+      el.addEventListener("click", async () => {
+        $("band-msg").textContent = "";
+        try { render(await api("/api/rig/tune", "POST", { band: b.name })); }
+        catch (e) { $("band-msg").textContent = e.message; }
+      });
+      bands.append(el);
+    }
+  }
+  for (const el of bands.children) {
+    const on = Number(el.dataset.hz) === rig.freqHz;
+    el.classList.toggle("on", on); el.setAttribute("aria-pressed", String(on));
+  }
+  if (!rig.connected) $("band-msg").textContent = "";
   const state = !rx.audio ? ["pill-idle", "dot-off", "No audio"] : rx.receiving ? ["pill-busy", "dot-on", "Receiving " + rx.mode] : ["pill-rx", "dot-on", "Listening"];
   $("rx-pill").className = "pill " + state[0];
   $("rx-dot").className = "dot " + state[1];

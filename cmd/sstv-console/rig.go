@@ -163,3 +163,71 @@ func (r *rigConn) ptt(on bool) error {
 	}
 	return p.Write("TX0;")
 }
+
+// sstvBand is a band's usual SSTV frequency. By convention SSTV is on lower sideband on
+// 80 and 40 m and upper sideband from 20 m up.
+type sstvBand struct {
+	Name   string `json:"name"`
+	FreqHz int    `json:"freqHz"`
+	Lower  bool   `json:"lower"`
+}
+
+// The calling frequencies in the ARRL band plan and the long-standing SSTV frequency lists.
+var sstvBands = []sstvBand{
+	{"80m", 3845000, true},
+	{"40m", 7171000, true},
+	{"20m", 14230000, false},
+	{"15m", 21340000, false},
+	{"10m", 28680000, false},
+	{"6m", 50680000, false},
+}
+
+// tune moves VFO A to a band's SSTV frequency on the right sideband. A radio in a DATA
+// mode stays in DATA (DATA-L or DATA-U); anything else becomes LSB or USB.
+func (r *rigConn) tune(band string) error {
+	var b *sstvBand
+	for i := range sstvBands {
+		if sstvBands[i].Name == band {
+			b = &sstvBands[i]
+		}
+	}
+	if b == nil {
+		return fmt.Errorf("no SSTV frequency for %q", band)
+	}
+	r.io.Lock()
+	r.mu.Lock()
+	p, gen, now := r.port, r.gen, r.st.Mode
+	r.mu.Unlock()
+	if p == nil {
+		r.io.Unlock()
+		return fmt.Errorf("the radio isn't connected")
+	}
+	mode := ft710.USB
+	switch data := strings.HasPrefix(now, "DATA-") && now != "DATA-FM"; {
+	case data && b.Lower:
+		mode = ft710.DATAL
+	case data:
+		mode = ft710.DATAU
+	case b.Lower:
+		mode = ft710.LSB
+	}
+	fa, err := ft710.SetFreqA(b.FreqHz)
+	if err == nil {
+		err = p.Write(fa)
+	}
+	if err == nil {
+		var md string
+		if md, err = ft710.SetMode(mode); err == nil {
+			err = p.Write(md)
+		}
+	}
+	r.io.Unlock()
+	if err != nil {
+		return err
+	}
+	r.poll(gen) // read it back: the page shows what the radio says, not what we asked
+	if got := r.status().FreqHz; got != b.FreqHz {
+		return fmt.Errorf("the radio didn't move to %s (it may not cover that band, or it's transmitting)", band)
+	}
+	return nil
+}

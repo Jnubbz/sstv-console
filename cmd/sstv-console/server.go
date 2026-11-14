@@ -164,6 +164,17 @@ func (a *App) handler() http.Handler {
 		a.set.update(func(s *Settings) { s.RigPort, s.RigBaud = req.Port, req.Baud })
 		writeJSON(w, http.StatusOK, a.status())
 	})
+	mux.HandleFunc("POST /api/rig/tune", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Band string `json:"band"`
+		}
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+		if err := a.rig.tune(req.Band); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, a.status())
+	})
 	mux.HandleFunc("POST /api/rig/disconnect", func(w http.ResponseWriter, r *http.Request) {
 		a.rig.disconnect()
 		a.set.update(func(s *Settings) { s.RigPort = "" })
@@ -192,11 +203,12 @@ type appStatus struct {
 	RX       rxStatus     `json:"rx"`
 	Settings Settings     `json:"settings"`
 	Pictures string       `json:"picturesDir"`
+	Bands    []sstvBand   `json:"bands"`
 }
 
 func (a *App) status() appStatus {
 	return appStatus{Version: appVersion, Update: updater.status(), Rig: a.rig.status(), RX: a.rx.status(),
-		Settings: a.set.get(), Pictures: a.rx.picDir}
+		Settings: a.set.get(), Pictures: a.rx.picDir, Bands: sstvBands}
 }
 
 func (a *App) guard(next http.Handler) http.Handler {

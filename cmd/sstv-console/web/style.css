@@ -104,3 +104,9 @@ canvas.waterfall { width: 100%; display: block; }
 .stats div { padding: 8px 10px; border-radius: 8px; background: var(--raised); }
 .stats dt { font-size: 11px; color: var(--muted); }
 .stats dd { margin: 0; font-weight: 600; }
+
+/* band buttons */
+.bands { display: flex; gap: 6px; flex-wrap: wrap; }
+.band { height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); color: #C9D5E6; font: inherit; cursor: pointer; }
+.band:hover { border-color: #2F5FA8; }
+.band.on { border-color: var(--blue); background: var(--blue-soft); color: #fff; }

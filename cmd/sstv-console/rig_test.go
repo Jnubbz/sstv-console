@@ -93,3 +93,64 @@ func TestReceiverSavesAPicture(t *testing.T) {
 		t.Fatalf("after restart: %+v", again)
 	}
 }
+
+// A radio that remembers what it was told.
+type tunableRadio struct {
+	fakeRadio
+	freq, mode string
+}
+
+func (f *tunableRadio) Ask(cmd string) (string, error) {
+	switch cmd {
+	case "ID;":
+		return "ID0800;", nil
+	case "FA;":
+		return "FA" + f.freq + ";", nil
+	case "MD0;":
+		return "MD0" + f.mode + ";", nil
+	}
+	return "", errors.New("no answer")
+}
+
+func (f *tunableRadio) Write(cmd string) error {
+	f.sent = append(f.sent, cmd)
+	switch {
+	case strings.HasPrefix(cmd, "FA"):
+		f.freq = cmd[2 : len(cmd)-1]
+	case strings.HasPrefix(cmd, "MD0"):
+		f.mode = cmd[3:4]
+	}
+	return nil
+}
+
+func TestTuneToSSTVFrequencies(t *testing.T) {
+	radio := &tunableRadio{freq: "014074000", mode: "2"} // 20 m, USB
+	r := newRig()
+	r.open = func(string, int) (catPort, error) { return radio, nil }
+	if err := r.connect("port", 38400); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		band, before, freq, mode string
+	}{
+		{"40m", "2", "007171000", "1"}, // voice: lower sideband on 40
+		{"20m", "1", "014230000", "2"}, // and upper on 20
+		{"80m", "C", "003845000", "8"}, // a radio in DATA-U stays in DATA: DATA-L
+		{"10m", "8", "028680000", "C"},
+	} {
+		radio.mode = c.before
+		r.poll(r.gen)
+		if err := r.tune(c.band); err != nil {
+			t.Fatalf("%s: %v", c.band, err)
+		}
+		if radio.freq != c.freq || radio.mode != c.mode {
+			t.Errorf("%s from mode %s: radio at %s mode %s, want %s mode %s", c.band, c.before, radio.freq, radio.mode, c.freq, c.mode)
+		}
+	}
+	if st := r.status(); st.FreqHz != 28680000 || st.Mode != "DATA-U" {
+		t.Errorf("status %+v", st)
+	}
+	if err := r.tune("17m"); err == nil {
+		t.Error("tuned to a band with no SSTV frequency")
+	}
+}
