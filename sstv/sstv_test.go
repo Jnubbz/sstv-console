@@ -145,7 +145,7 @@ func TestNoiseAloneStartsNothing(t *testing.T) {
 			}
 		}
 	}
-	if len(d.freq) > 12000*5 {
+	if len(d.freq) > 12000*9 {
 		t.Errorf("buffer grew to %d samples while idle", len(d.freq))
 	}
 }
@@ -166,4 +166,100 @@ func TestTwoPicturesInARow(t *testing.T) {
 	if len(got) != 2 || got[0] != a.Name || got[1] != b.Name {
 		t.Fatalf("got %v", got)
 	}
+}
+
+// Tuning in partway through (no header heard): the decoder must lock on from the line
+// syncs, name the mode from their spacing, and end the picture when the signal does.
+func TestJoinsAPictureAlreadyUnderWay(t *testing.T) {
+	for _, name := range []string{"Scottie 1", "Scottie 2", "Martin 1", "Martin 2", "Robot 36", "Robot 72", "PD120"} {
+		m := ByName(name)
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			card := TestCard(m.Width, m.Height)
+			full := encode(card, m, 48000, 35)
+			line, _, _ := m.layout()
+			cut := int((0.91 + 30.4*line) * 48000) // header and 30 lines gone, mid-line
+			audio := append(make([]float32, 24000), full[cut:]...)
+			audio = append(audio, make([]float32, 48000*int(25*line+3))...)
+			var done *Event
+			var started *Event
+			d := NewDecoder(48000)
+			for i := 0; i < len(audio); i += 4096 {
+				for _, e := range d.Write(audio[i:min(i+4096, len(audio))]) {
+					e := e
+					if e.Kind == Started && started == nil {
+						started = &e
+					}
+					if e.Kind == Done {
+						done = &e
+					}
+				}
+			}
+			if started == nil || started.Mode != m || !started.Joined {
+				t.Fatalf("did not lock on as %s: %+v", name, started)
+			}
+			if done == nil {
+				t.Fatal("picture never finished")
+			}
+			if math.Abs(done.OffsetHz-35) > 15 {
+				t.Errorf("offset measured as %.0f Hz, want 35", done.OffsetHz)
+			}
+			rows := m.Height / m.radioLines()
+			skipped := 31 * rows // the first whole line heard is line 31
+			h := done.Image.Bounds().Dy()
+			if h < m.Height-skipped-2*rows || h > m.Height-skipped+rows {
+				t.Errorf("picture is %d rows, want about %d", h, m.Height-skipped)
+			}
+			// compare with the card from the line it joined at
+			var s float64
+			var n int
+			W := m.Width
+			for y := 2; y < h-4; y++ {
+				cy := y + skipped
+				if cy >= m.Height || (cy >= m.Height/2-3 && cy <= m.Height/2+3) {
+					continue
+				}
+				for x := 0; x < W; x++ {
+					if bw := W / 8; cy < m.Height/2 && (x%bw < 6 || x%bw >= bw-6) {
+						continue
+					}
+					for c := 0; c < 3; c++ {
+						s += math.Abs(float64(card.Pix[(cy*W+x)*4+c]) - float64(done.Image.Pix[(y*W+x)*4+c]))
+						n++
+					}
+				}
+			}
+			if e := s / float64(n); e > 8 {
+				t.Errorf("picture is off by %.1f levels", e)
+			}
+		})
+	}
+}
+
+func TestJoinsThroughNoise(t *testing.T) {
+	m := ByName("Scottie 1")
+	full := Encode(TestCard(m.Width, m.Height), m, 48000)
+	audio := append([]float32{}, full[48000*20:48000*70]...)
+	audio = append(audio, make([]float32, 48000*12)...)
+	rng := rand.New(rand.NewSource(3))
+	for i := range audio {
+		audio[i] += float32(rng.NormFloat64() * 0.18) // about 10 dB
+	}
+	d := NewDecoder(48000)
+	var done *Event
+	for i := 0; i < len(audio); i += 4096 {
+		for _, e := range d.Write(audio[i:min(i+4096, len(audio))]) {
+			e := e
+			if e.Kind == Done {
+				done = &e
+			}
+		}
+	}
+	if done == nil || done.Mode != m || !done.Joined {
+		t.Fatalf("did not lock on through noise: %+v", done)
+	}
+	if h := done.Image.Bounds().Dy(); h < 100 || h > 125 { // 50 s of a 428 ms line: 116 lines
+		t.Errorf("picture is %d rows, want about 116", h)
+	}
+	t.Logf("%d rows, %d syncs", done.Image.Bounds().Dy(), done.Synced)
 }

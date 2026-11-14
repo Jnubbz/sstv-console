@@ -125,6 +125,10 @@ func (a *App) handler() http.Handler {
 		a.rx.reset()
 		writeJSON(w, http.StatusOK, a.status())
 	})
+	mux.HandleFunc("POST /api/rx/record", func(w http.ResponseWriter, r *http.Request) {
+		a.rx.record()
+		writeJSON(w, http.StatusOK, a.status())
+	})
 	mux.HandleFunc("GET /api/pictures", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, a.rx.pictures())
 	})

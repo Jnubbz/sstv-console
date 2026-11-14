@@ -154,3 +154,28 @@ func TestTuneToSSTVFrequencies(t *testing.T) {
 		t.Error("tuned to a band with no SSTV frequency")
 	}
 }
+
+// Tuning in partway: the picture is still saved, at the size that was received, and a test
+// recording comes out as a WAV file.
+func TestReceiverJoinsAndRecords(t *testing.T) {
+	dir, pics := t.TempDir(), t.TempDir()
+	rx := newReceiver(dir, pics, func() int { return 0 })
+	m := sstv.ByName("Robot 36")
+	full := sstv.Encode(sstv.TestCard(m.Width, m.Height), m, 48000)
+	audio := append([]float32{}, full[48000*10:]...) // the first 10 s missed
+	audio = append(audio, make([]float32, 48000*52)...)
+	rx.record()
+	joined := false
+	for i := 0; i < len(audio); i += 4096 {
+		rx.push(audio[i:min(i+4096, len(audio))], 48000)
+		joined = joined || rx.status().Joined
+	}
+	list := rx.pictures()
+	if !joined || len(list) != 1 || list[0].H < 150 || list[0].H > 185 { // 26.9 s of 150 ms lines: about 179 rows
+		t.Fatalf("joined %v, pictures %+v", joined, list)
+	}
+	rec := rx.status().Recorded
+	if st, err := os.Stat(rec); err != nil || st.Size() != 44+60*48000*2 {
+		t.Fatalf("recording %q: %v", rec, err)
+	}
+}

@@ -154,6 +154,9 @@ function renderRadio(s) {
     $("audio-msg").textContent = rx.levelDb > -1 ? "Too loud: it's clipping. Turn the radio's USB output level down."
       : rx.levelDb < -50 ? "Audio is on, but very quiet. Check the radio's USB output level." : "Audio is on.";
   }
+  $("rec-btn").disabled = !rx.audio || rx.recording > 0;
+  if (rx.recording > 0) $("rec-msg").textContent = `Recording… ${rx.recording} s left`;
+  else if (rx.recorded) $("rec-msg").textContent = "Saved: " + rx.recorded;
   $("rig-btn").textContent = rig.connected ? "Disconnect" : "Connect";
   if (rig.connected) { $("rig-msg").className = "small " + (rig.error ? "err" : "muted"); $("rig-msg").textContent = rig.error || `Connected to the ${rig.model}.`; }
 
@@ -174,7 +177,7 @@ function renderRadio(s) {
   }
   const got = rx.receiving || liveV > 0;
   $("st-mode").textContent = got && rx.mode ? rx.mode : "—";
-  $("st-line").textContent = rx.receiving ? `${Math.round(100 * rx.line / rx.lines)}%` : (liveV > 0 ? "Done" : "—");
+  $("st-line").textContent = rx.receiving ? (rx.joined ? `Row ${rx.line}` : `${Math.round(100 * rx.line / rx.lines)}%`) : (liveV > 0 ? "Done" : "—");
   $("st-off").textContent = got ? `${rx.offsetHz >= 0 ? "+" : ""}${Math.round(rx.offsetHz)} Hz` : "—";
   $("st-slant").textContent = got ? (Math.abs(rx.slantPpm) < 30 ? "None" : "Fixed") : "—";
   $("live-bar").style.width = rx.receiving ? `${100 * rx.line / rx.lines}%` : "0";
@@ -305,6 +308,7 @@ function toggleRadio(open) {
 $("radio-btn").addEventListener("click", () => toggleRadio());
 $("rig-pill").addEventListener("click", () => toggleRadio(true));
 $("hello-btn").addEventListener("click", () => toggleRadio(true));
+$("rec-btn").addEventListener("click", () => api("/api/rx/record", "POST").then(render).catch(() => {}));
 $("rx-reset").addEventListener("click", () => api("/api/rx/reset", "POST").then(render).catch(() => {}));
 
 function when(iso) {

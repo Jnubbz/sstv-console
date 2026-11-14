@@ -25,6 +25,7 @@ type Event struct {
 	OffsetHz float64 // how far off-tune the signal is (corrected for)
 	SlantPPM float64 // the sender's clock against ours (corrected for)
 	Synced   int     // lines whose sync pulse was found
+	Joined   bool    // no header was heard: locked on partway through, from the line syncs
 }
 
 // Decoder turns audio into pictures. Feed it audio with Write as it arrives.
@@ -46,6 +47,20 @@ type Decoder struct {
 	freq []float32 // instantaneous frequency at the working rate
 	scan int       // where the header search is up to
 	cur  *rx
+
+	// the search for line sync pulses (a picture already under way)
+	pscan    int
+	inLow    bool
+	lowStart int
+	lowSum   float64
+	pulses   []pulse
+}
+
+// pulse is a short 1200 Hz-ish burst: maybe a line sync.
+type pulse struct {
+	pos   float64 // where it starts, in freq
+	width float64 // samples
+	f     float64 // its mean frequency
 }
 
 type rx struct {
@@ -61,6 +76,8 @@ type rx struct {
 	planes  [3][]uint8
 	img     *image.RGBA
 	isSecnd []bool // Robot 36: line carries B-Y
+	joined  bool   // started from line syncs, not a header
+	lastK   int    // last line whose sync was found
 }
 
 // NewDecoder makes a decoder for audio at sampleRate (e.g. 48000).
@@ -104,7 +121,15 @@ func (d *Decoder) Receiving() *Mode {
 func (d *Decoder) Reset() {
 	d.cur = nil
 	d.freq = d.freq[:0]
-	d.scan = 0
+	d.idle(0)
+}
+
+// idle: back to searching, from position from.
+func (d *Decoder) idle(from int) {
+	d.cur = nil
+	d.scan, d.pscan = from, from
+	d.inLow = false
+	d.pulses = d.pulses[:0]
 }
 
 // Write takes more audio (-1..1) and returns what happened.
@@ -113,7 +138,8 @@ func (d *Decoder) Write(samples []float32) []Event {
 	var ev []Event
 	for {
 		if d.cur == nil {
-			if !d.findHeader(&ev) {
+			if !d.findHeader(&ev) && !d.findSyncs(&ev) {
+				d.trim()
 				break
 			}
 		}
@@ -276,22 +302,144 @@ func (d *Decoder) findHeader(ev *[]Event) bool {
 		*ev = append(*ev, Event{Kind: Started, Mode: m, Image: d.cur.img, OffsetHz: off})
 		return true
 	}
-	// keep only what a header still to come could need
-	if keep := lead + need + step; d.scan > keep+int(2000*ms) {
-		cut := d.scan - keep
-		d.freq = append(d.freq[:0], d.freq[cut:]...)
-		d.scan -= cut
+	return false
+}
+
+// trim keeps the last few seconds while idle: enough to go back to the first lines of a
+// picture found by its syncs.
+func (d *Decoder) trim() {
+	keep := int(6 * d.fw)
+	if len(d.freq) < keep+int(2*d.fw) {
+		return
+	}
+	cut := len(d.freq) - keep
+	d.freq = append(d.freq[:0], d.freq[cut:]...)
+	d.scan = max(d.scan-cut, 0)
+	d.pscan = max(d.pscan-cut, 0)
+	d.lowStart -= cut
+	kept := d.pulses[:0]
+	for _, p := range d.pulses {
+		if p.pos -= float64(cut); p.pos >= 0 {
+			kept = append(kept, p)
+		}
+	}
+	d.pulses = kept
+}
+
+// byLine: the modes, shortest line first (so Robot 36 is tried before Robot 72, whose
+// line is twice as long and would match every other pulse).
+var byLine = func() []*Mode {
+	out := append([]*Mode{}, Modes...)
+	for i := range out {
+		for j := i + 1; j < len(out); j++ {
+			li, _, _ := out[i].layout()
+			lj, _, _ := out[j].layout()
+			if lj < li {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out
+}()
+
+// findSyncs looks for a picture already under way: sync pulses one line apart. Each
+// mode's line length is different, so the spacing says which mode it is. On success it
+// starts a picture at the earliest line still in memory and returns true.
+func (d *Decoder) findSyncs(ev *[]Event) bool {
+	ms := d.fw / 1000
+	h := int(1 * ms) // smooth over 2 ms
+	if d.pscan < h {
+		d.pscan = h
+	}
+	if d.pscan+h >= len(d.freq) {
+		return false
+	}
+	sum := 0.0
+	for _, f := range d.freq[d.pscan-h : d.pscan+h] {
+		sum += float64(f)
+	}
+	for ; d.pscan+h < len(d.freq); d.pscan++ {
+		i := d.pscan
+		low := sum/float64(2*h) < 1400
+		sum += float64(d.freq[i+h]) - float64(d.freq[i-h])
+		switch {
+		case low && !d.inLow:
+			d.inLow, d.lowStart, d.lowSum = true, i, 0
+			fallthrough
+		case low:
+			d.lowSum += float64(d.freq[i])
+		case d.inLow:
+			d.inLow = false
+			w := float64(i - d.lowStart)
+			if w < 3.5*ms || w > 26*ms || d.lowStart < 0 {
+				continue
+			}
+			d.pulses = append(d.pulses, pulse{pos: float64(d.lowStart), width: w, f: d.lowSum / w})
+			if m, first, off := d.train(); m != nil {
+				d.pscan++
+				d.startAt(m, first, off, true)
+				*ev = append(*ev, Event{Kind: Started, Mode: m, Image: d.cur.img, OffsetHz: off, Joined: true})
+				return true
+			}
+		}
 	}
 	return false
 }
 
+// train: does the newest pulse end a run of pulses one line apart? It wants 4 of the
+// last 5 line positions filled, and a pulse as long as the mode's sync.
+func (d *Decoder) train() (*Mode, float64, float64) {
+	ms := d.fw / 1000
+	n := len(d.pulses)
+	last := d.pulses[n-1]
+	for _, m := range byLine {
+		if w := last.width / ms; w < m.Sync*1000*0.55 || w > m.Sync*1000*1.45 {
+			continue
+		}
+		line, syncAt, _ := m.layout()
+		T := line * d.fw
+		hits, first, fsum := 1, last.pos, last.f
+		for j := 1; j <= 4; j++ {
+			want := last.pos - float64(j)*T
+			tol := 1*ms + float64(j)*0.001*T
+			for k := n - 2; k >= 0 && d.pulses[k].pos > want-tol; k-- {
+				p := d.pulses[k]
+				if math.Abs(p.pos-want) <= tol && p.width/ms > m.Sync*1000*0.55 && p.width/ms < m.Sync*1000*1.45 {
+					hits++
+					first = p.pos
+					fsum += p.f
+					break
+				}
+			}
+		}
+		if hits < 4 {
+			continue
+		}
+		off := fsum/float64(hits) - FreqSync
+		if math.Abs(off) > 200 {
+			continue
+		}
+		for first-syncAt*d.fw < 0 { // Scottie's sync is mid-line: the line must be whole
+			first += T
+		}
+		return m, first, off
+	}
+	return nil, 0, 0
+}
+
 func (d *Decoder) start(m *Mode, t0, off float64) {
-	line, syncAt, segs := m.layout()
-	r := &rx{mode: m, off: off, lineN: line * d.fw, syncAt: syncAt * d.fw, segs: segs}
+	_, syncAt, _ := m.layout()
 	if m.Family == Scottie {
 		t0 += m.Sync * d.fw // the starting sync
 	}
-	r.a0 = t0 + r.syncAt
+	d.startAt(m, t0+syncAt*d.fw, off, false)
+}
+
+// startAt begins a picture whose first line's sync pulse is at a0.
+func (d *Decoder) startAt(m *Mode, a0, off float64, joined bool) {
+	line, syncAt, segs := m.layout()
+	r := &rx{mode: m, off: off, lineN: line * d.fw, syncAt: syncAt * d.fw, segs: segs, joined: joined}
+	r.a0 = a0
 	r.a, r.b = r.a0, r.lineN
 	for i := range r.planes {
 		r.planes[i] = make([]uint8, m.Width*m.Height)
@@ -327,33 +475,45 @@ func (d *Decoder) receive(ev *[]Event) bool {
 		x, f := d.lowest(int(pred-5*ms), int(pred+5*ms), w)
 		if f < FreqSync+r.off+120 {
 			r.ks, r.ys = append(r.ks, k), append(r.ys, float64(x))
+			r.lastK = r.next
 			d.fit(r)
 		}
-		if r.next == 12 && len(r.ks) < 3 { // a false header, or the signal went away
-			d.cur = nil
-			d.scan = int(r.a0)
-			*ev = append(*ev, Event{Kind: Aborted, Mode: m})
+		if r.next == 12 && len(r.ks) < 3 { // a false start, or the signal went away
+			d.idle(int(pred))
+			*ev = append(*ev, Event{Kind: Aborted, Mode: m, Joined: r.joined})
 			return true
+		}
+		// Joined partway: the picture's length isn't known, so it ends when the syncs do.
+		if r.joined && r.next-r.lastK > 20 {
+			lines = r.lastK + 1
+			break
 		}
 		d.line(r, r.next)
 		r.next++
 		*ev = append(*ev, Event{Kind: Line, Mode: m, Line: r.next * rows, Image: r.img, OffsetHz: r.off,
-			SlantPPM: (r.b/r.lineN - 1) * 1e6, Synced: len(r.ks)})
+			SlantPPM: (r.b/r.lineN - 1) * 1e6, Synced: len(r.ks), Joined: r.joined})
 	}
 	// the whole picture again with the final timing: straightens the early lines
 	d.fit(r)
 	for k := 0; k < lines; k++ {
 		d.line(r, k)
 	}
-	*ev = append(*ev, Event{Kind: Done, Mode: m, Line: m.Height, Image: r.img, OffsetHz: r.off,
-		SlantPPM: (r.b/r.lineN - 1) * 1e6, Synced: len(r.ks)})
+	img := r.img
+	if got := lines * rows; got < m.Height { // ended early: keep only what was received
+		img = image.NewRGBA(image.Rect(0, 0, m.Width, got))
+		copy(img.Pix, r.img.Pix[:got*m.Width*4])
+	}
+	*ev = append(*ev, Event{Kind: Done, Mode: m, Line: lines * rows, Image: img, OffsetHz: r.off,
+		SlantPPM: (r.b/r.lineN - 1) * 1e6, Synced: len(r.ks), Joined: r.joined})
 	end := int(r.a + r.b*float64(lines) - r.syncAt)
 	if end > len(d.freq) {
 		end = len(d.freq)
 	}
+	if end < 0 {
+		end = 0
+	}
 	d.freq = append(d.freq[:0], d.freq[end:]...)
-	d.scan = 0
-	d.cur = nil
+	d.idle(0)
 	return true
 }
 

@@ -47,6 +47,9 @@ type rxStatus struct {
 	LiveV     int     `json:"liveV"`     // changes when the live picture does
 	PicturesV int     `json:"picturesV"` // changes when the list does
 	Note      string  `json:"note,omitempty"`
+	Joined    bool    `json:"joined"`              // locked on partway: no start tones heard
+	Recording int     `json:"recording,omitempty"` // seconds left of a test recording
+	Recorded  string  `json:"recorded,omitempty"`  // the last test recording's file
 }
 
 var dumpAudio = func() *os.File {
@@ -67,6 +70,9 @@ type receiver struct {
 	pics      []Picture   // newest first
 	picDir    string
 	indexPath string
+	rec       []int16 // a test recording in progress
+	recLeft   int     // samples still to record
+	recRate   int
 	freq      func() int // the radio's frequency now (0 if unknown)
 	now       func() time.Time
 }
@@ -161,13 +167,28 @@ func (r *receiver) push(samples []float32, rate int) {
 		}
 	}
 	r.st.LevelDB = math.Max(-120, 20*math.Log10(peak+1e-9))
+	if r.recLeft > 0 {
+		if r.recRate != rate { // first block: now the rate is known
+			r.recRate, r.recLeft = rate, recordSeconds*rate
+		}
+		for _, v := range samples {
+			r.rec = append(r.rec, int16(math.Max(-1, math.Min(1, float64(v)))*32767))
+		}
+		if r.recLeft -= len(samples); r.recLeft <= 0 {
+			r.finishRecording()
+		}
+		r.st.Recording = max(r.recLeft, 0) / rate
+	}
 	changed := false
 	for _, e := range r.dec.Write(samples) {
 		switch e.Kind {
 		case sstv.Started:
 			r.st.Receiving, r.st.Mode, r.st.Line, r.st.Lines = true, e.Mode.Name, 0, e.Mode.Height
 			r.st.W, r.st.H = e.Mode.Width, e.Mode.Height
-			r.st.OffsetHz, r.st.SlantPPM, r.st.Note = e.OffsetHz, 0, ""
+			r.st.OffsetHz, r.st.SlantPPM, r.st.Note, r.st.Joined = e.OffsetHz, 0, "", e.Joined
+			if e.Joined {
+				r.st.Note = "Joined partway through: the start of this picture was missed."
+			}
 			r.live = clone(e.Image)
 			changed = true
 		case sstv.Line:
@@ -176,7 +197,7 @@ func (r *receiver) push(samples []float32, rate int) {
 			changed = true
 		case sstv.Aborted:
 			r.st.Receiving = false
-			r.st.Note = "Lost the signal right after the start tones"
+			r.st.Note = "Lost the signal right after it started"
 		case sstv.Done:
 			r.st.Receiving = false
 			r.live = clone(e.Image)
@@ -223,7 +244,7 @@ func (r *receiver) save(e sstv.Event) {
 		return
 	}
 	p := Picture{ID: id, Time: t.Format(time.RFC3339), Mode: e.Mode.Name, FreqHz: hz, Offset: math.Round(e.OffsetHz),
-		Slant: math.Round(e.SlantPPM), Synced: e.Synced, W: e.Mode.Width, H: e.Mode.Height}
+		Slant: math.Round(e.SlantPPM), Synced: e.Synced, W: e.Image.Bounds().Dx(), H: e.Image.Bounds().Dy()}
 	r.pics = append([]Picture{p}, r.pics...)
 	r.st.PicturesV++
 	b, _ := json.MarshalIndent(r.pics, "", " ")
@@ -231,4 +252,53 @@ func (r *receiver) save(e sstv.Event) {
 	if os.WriteFile(tmp, b, 0o644) == nil {
 		os.Rename(tmp, r.indexPath)
 	}
+}
+
+// A test recording: a minute of exactly the audio the decoder is given, as a WAV file next
+// to the pictures. For working out why something didn't decode.
+const recordSeconds = 60
+
+func (r *receiver) record() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.recLeft > 0 {
+		return
+	}
+	r.rec, r.recRate, r.recLeft = nil, 0, 1 // sized at the first block
+	r.st.Recording, r.st.Recorded = recordSeconds, ""
+}
+
+// finishRecording writes the WAV. Called with the lock held.
+func (r *receiver) finishRecording() {
+	name := "Recording " + r.now().UTC().Format("2006-01-02 150405") + "Z"
+	if hz := r.freq(); hz > 0 {
+		name += fmt.Sprintf(" %d kHz", hz/1000)
+	}
+	path := filepath.Join(r.picDir, name+".wav")
+	if want := recordSeconds * r.recRate; len(r.rec) > want {
+		r.rec = r.rec[:want]
+	}
+	n := len(r.rec) * 2
+	h := make([]byte, 44, 44+n)
+	copy(h, "RIFF")
+	binary.LittleEndian.PutUint32(h[4:], uint32(36+n))
+	copy(h[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(h[16:], 16)
+	binary.LittleEndian.PutUint16(h[20:], 1)
+	binary.LittleEndian.PutUint16(h[22:], 1)
+	binary.LittleEndian.PutUint32(h[24:], uint32(r.recRate))
+	binary.LittleEndian.PutUint32(h[28:], uint32(r.recRate*2))
+	binary.LittleEndian.PutUint16(h[32:], 2)
+	binary.LittleEndian.PutUint16(h[34:], 16)
+	copy(h[36:], "data")
+	binary.LittleEndian.PutUint32(h[40:], uint32(n))
+	for _, v := range r.rec {
+		h = binary.LittleEndian.AppendUint16(h, uint16(v))
+	}
+	r.rec, r.recLeft = nil, 0
+	if err := os.WriteFile(path, h, 0o644); err != nil {
+		r.st.Note = "Couldn't save the recording: " + err.Error()
+		return
+	}
+	r.st.Recorded = path
 }
