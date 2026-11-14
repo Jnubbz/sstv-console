@@ -29,7 +29,9 @@ Early days. In place now:
 - [x] SSTV decoder and encoder (`sstv/`): Scottie 1/2/DX, Martin 1/2, Robot 36/72,
       PD120/180/240, with header (VIS) detection, off-tune correction and slant correction.
       `cmd/sstv-file` runs it on WAV files
-- [ ] Live receive in the app: the radio's audio into the decoder, pictures onto the page
+- [x] Radio panel: pick the radio's sound input, connect CAT (frequency and mode in the top bar)
+- [x] Live receive: waterfall, the picture as it arrives, finished pictures saved to
+      `Pictures/SSTV Console` and listed
 - [ ] Inbox and conversation threads, with the callsign read from the FSK ID or the picture
 - [ ] Quick replies: templates with callsign, RST and name filled in
 - [ ] SSTV transmit and FT-710 rig control

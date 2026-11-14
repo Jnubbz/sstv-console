@@ -91,7 +91,7 @@ func TestSwapAppOnTheMac(t *testing.T) {
 }
 
 func TestGuard(t *testing.T) {
-	a := &App{port: 7380, quit: func() {}}
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
 	h := a.handler()
 	cases := []struct {
 		method, host, header string
@@ -130,7 +130,7 @@ func TestGuard(t *testing.T) {
 }
 
 func TestPageIsEmbedded(t *testing.T) {
-	a := &App{port: 7380, quit: func() {}}
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Host, r.RemoteAddr = "localhost:7380", "127.0.0.1:1"
 	w := httptest.NewRecorder()

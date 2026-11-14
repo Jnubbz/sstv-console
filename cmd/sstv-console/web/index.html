@@ -23,9 +23,14 @@
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 15l5-5 4 4 3-3 6 6"></path><circle cx="16" cy="9" r="1.5"></circle></svg>
     <span>SSTV Console</span>
   </div>
-  <div class="rig"><span class="dot dot-off"></span><span class="muted">No radio connected</span></div>
+  <button id="rig-pill" class="rig" title="Radio settings">
+    <span id="rig-dot" class="dot dot-off"></span>
+    <span id="rig-freq" class="freq" hidden></span>
+    <span id="rig-text" class="muted">No radio connected</span>
+  </button>
   <div class="spacer"></div>
-  <div class="pill pill-rx"><span class="dot dot-on"></span>RX</div>
+  <div id="rx-pill" class="pill pill-idle"><span id="rx-dot" class="dot dot-off"></span><span id="rx-text">No audio</span></div>
+  <button id="radio-btn" class="btn" aria-expanded="false">Radio</button>
   <div class="menu">
     <button id="menu-btn" class="btn" aria-haspopup="true" aria-expanded="false">About</button>
     <div id="menu" class="menu-panel" hidden>
@@ -38,26 +43,70 @@
   </div>
 </header>
 
-<div class="panes">
-  <nav class="pane inbox" aria-label="Inbox">
-    <h2>Inbox</h2>
-    <div class="empty">
-      <p>Pictures you receive land here, filed under the station that sent them.</p>
+<section id="radio" class="radio" hidden aria-label="Radio">
+  <div class="radio-card">
+    <h2>1. Sound from the radio</h2>
+    <p class="muted small">The radio's USB sound card. On an FT-710 it shows up as a USB audio device.</p>
+    <div class="row">
+      <label class="field grow">Input
+        <select id="audio-dev"><option value="">Turn on audio to list inputs</option></select>
+      </label>
+      <button id="audio-btn" class="btn btn-primary">Turn on audio</button>
     </div>
+    <div class="meter" aria-hidden="true"><div id="level"></div></div>
+    <p id="audio-msg" class="small muted"></p>
+  </div>
+  <div class="radio-card">
+    <h2>2. Radio control (CAT)</h2>
+    <p class="muted small">Shows the radio's frequency and labels each picture with it. Optional for receiving.</p>
+    <div class="row">
+      <label class="field grow">Port
+        <select id="rig-port"></select>
+      </label>
+      <label class="field">Speed
+        <select id="rig-baud"></select>
+      </label>
+      <button id="rig-btn" class="btn btn-primary">Connect</button>
+    </div>
+    <p id="rig-msg" class="small muted"></p>
+  </div>
+</section>
+
+<div class="panes">
+  <nav class="pane inbox" aria-label="Received pictures">
+    <div class="pane-head"><h2>Received</h2><span id="pic-count" class="muted small"></span></div>
+    <div id="inbox-empty" class="empty">
+      <p>Pictures you receive land here and are saved to your Pictures folder.</p>
+    </div>
+    <ul id="pics" class="pics"></ul>
   </nav>
 
   <main class="pane thread">
-    <div class="empty empty-big">
-      <p class="lead">No conversation open</p>
-      <p class="muted">Pick a station in the Inbox to see its pictures and reply in one click.</p>
+    <div id="viewer-empty" class="empty empty-big">
+      <p class="lead" id="hello-title">Connect your radio</p>
+      <p class="muted" id="hello-text">Open Radio and turn on audio. Pictures decode on their own when a station sends one.</p>
+      <button id="hello-btn" class="btn btn-primary">Open Radio</button>
     </div>
+    <figure id="viewer" class="viewer" hidden>
+      <img id="viewer-img" alt="">
+      <figcaption id="viewer-cap" class="muted"></figcaption>
+    </figure>
   </main>
 
   <aside class="pane live" aria-label="Live receive">
     <h2>Live receive</h2>
-    <div class="waterfall" aria-hidden="true"></div>
-    <div class="scale"><span>1200 sync</span><span>1500</span><span>2300 Hz</span></div>
-    <div class="decode empty"><p>Waiting for a picture…</p></div>
+    <canvas id="waterfall" class="waterfall" width="300" height="120" aria-label="Waterfall, 1000 to 2500 hertz"></canvas>
+    <div class="scale" aria-hidden="true"><span class="tick t1200">1200</span><span class="tick t1500">1500</span><span class="tick t1900">1900</span><span class="tick t2300">2300 Hz</span></div>
+    <div id="live-box" class="decode empty"><p id="live-wait">Waiting for a picture…</p><img id="live-img" alt="Picture being received" hidden></div>
+    <div class="progress" aria-hidden="true"><div id="live-bar"></div></div>
+    <dl class="stats">
+      <div><dt>Mode</dt><dd id="st-mode">—</dd></div>
+      <div><dt>Progress</dt><dd id="st-line">—</dd></div>
+      <div><dt>Off-tune</dt><dd id="st-off">—</dd></div>
+      <div><dt>Slant</dt><dd id="st-slant">—</dd></div>
+    </dl>
+    <p id="live-note" class="small muted"></p>
+    <button id="rx-reset" class="btn btn-wide">Stop this picture</button>
   </aside>
 </div>
 </body>

@@ -47,7 +47,7 @@ func showWindow(url string, keep int) bool {
 	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "SSTV Console", "window")
 	os.MkdirAll(profile, 0o755)
 	cmd := exec.Command(edge, "--app="+url, "--user-data-dir="+profile,
-		"--window-size=1440,900", "--no-first-run", "--no-default-browser-check")
+		"--window-size=1440,900", "--autoplay-policy=no-user-gesture-required", "--no-first-run", "--no-default-browser-check")
 	if err := cmd.Start(); err != nil {
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		return false

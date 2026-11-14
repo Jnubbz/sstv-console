@@ -7,28 +7,6 @@ import (
 	"testing"
 )
 
-// testCard: colour bars on top, smooth gradients below (SSTV can't carry sharp detail, so
-// the comparison stays away from hard edges by using wide bars).
-func testCard(w, h int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	bars := [][3]uint8{{255, 255, 255}, {255, 255, 0}, {0, 255, 255}, {0, 255, 0}, {255, 0, 255}, {255, 0, 0}, {0, 0, 255}, {0, 0, 0}}
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			p := img.Pix[(y*w+x)*4:]
-			p[3] = 255
-			if y < h/2 {
-				c := bars[x*len(bars)/w]
-				p[0], p[1], p[2] = c[0], c[1], c[2]
-			} else {
-				p[0] = uint8(x * 255 / w)
-				p[1] = uint8((y - h/2) * 255 / (h / 2))
-				p[2] = uint8(255 - x*255/w)
-			}
-		}
-	}
-	return img
-}
-
 // diff: mean absolute error per channel, leaving out pixels next to a bar edge.
 func diff(a, b *image.RGBA) float64 {
 	w, h := a.Bounds().Dx(), a.Bounds().Dy()
@@ -83,7 +61,7 @@ func TestEveryModeRoundTrips(t *testing.T) {
 		m := m
 		t.Run(m.Name, func(t *testing.T) {
 			t.Parallel()
-			card := testCard(m.Width, m.Height)
+			card := TestCard(m.Width, m.Height)
 			for _, fs := range []int{48000, 44100} {
 				done, started := run(t, NewDecoder(fs), pad(Encode(card, m, fs), fs))
 				if started != m {
@@ -118,7 +96,7 @@ func TestLineLengths(t *testing.T) {
 // must still come out straight and the right colours.
 func TestOffTuneAndSlant(t *testing.T) {
 	m := ByName("Scottie 2")
-	card := testCard(m.Width, m.Height)
+	card := TestCard(m.Width, m.Height)
 	audio := pad(encode(card, m, 48000*1.0008, 60), 48000)
 	done, _ := run(t, NewDecoder(48000), audio)
 	if done == nil {
@@ -137,7 +115,7 @@ func TestOffTuneAndSlant(t *testing.T) {
 
 func TestThroughNoise(t *testing.T) {
 	m := ByName("Martin 2")
-	card := testCard(m.Width, m.Height)
+	card := TestCard(m.Width, m.Height)
 	audio := pad(Encode(card, m, 48000), 48000)
 	rng := rand.New(rand.NewSource(1))
 	for i := range audio { // signal is 0.8 peak (0.57 rms); noise 0.18 rms in 24 kHz: about 10 dB
@@ -174,8 +152,8 @@ func TestNoiseAloneStartsNothing(t *testing.T) {
 
 func TestTwoPicturesInARow(t *testing.T) {
 	a, b := ByName("Robot 36"), ByName("Martin 2")
-	audio := pad(Encode(testCard(a.Width, a.Height), a, 48000), 48000)
-	audio = append(audio, pad(Encode(testCard(b.Width, b.Height), b, 48000), 48000)...)
+	audio := pad(Encode(TestCard(a.Width, a.Height), a, 48000), 48000)
+	audio = append(audio, pad(Encode(TestCard(b.Width, b.Height), b, 48000), 48000)...)
 	d := NewDecoder(48000)
 	var got []string
 	for i := 0; i < len(audio); i += 4096 {

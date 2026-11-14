@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -48,7 +49,8 @@ func main() {
 	done := make(chan struct{})
 	quit := func() { once.Do(func() { close(done) }) }
 
-	app := &App{port: p, quit: quit}
+	app := newApp(p, quit, dataDir(), picturesDir())
+	go app.reconnect()
 	updater.start(app)
 	go func() {
 		if err := http.Serve(ln, app.handler()); err != nil {
@@ -72,6 +74,15 @@ func main() {
 	}
 	<-done
 	app.shutdown()
+}
+
+// picturesDir: where received pictures are saved (Pictures/SSTV Console).
+func picturesDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(dataDir(), "Pictures")
+	}
+	return filepath.Join(home, "Pictures", "SSTV Console")
 }
 
 // listen takes the port, or after an update waits for the old version to let go of it.
