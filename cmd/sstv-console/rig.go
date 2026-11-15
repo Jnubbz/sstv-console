@@ -182,8 +182,9 @@ var sstvBands = []sstvBand{
 	{"6m", 50680000, false},
 }
 
-// tune moves VFO A to a band's SSTV frequency on the right sideband. A radio in a DATA
-// mode stays in DATA (DATA-L or DATA-U); anything else becomes LSB or USB.
+// tune moves VFO A to a band's SSTV frequency and puts the radio in the mode SSTV needs,
+// whatever it was in (CW, FM, AM, voice SSB, RTTY...): DATA-U, or DATA-L on 80 and 40 m.
+// The DATA modes take their audio from the USB sound card instead of the microphone.
 func (r *rigConn) tune(band string) error {
 	var b *sstvBand
 	for i := range sstvBands {
@@ -196,20 +197,15 @@ func (r *rigConn) tune(band string) error {
 	}
 	r.io.Lock()
 	r.mu.Lock()
-	p, gen, now := r.port, r.gen, r.st.Mode
+	p, gen := r.port, r.gen
 	r.mu.Unlock()
 	if p == nil {
 		r.io.Unlock()
 		return fmt.Errorf("the radio isn't connected")
 	}
-	mode := ft710.USB
-	switch data := strings.HasPrefix(now, "DATA-") && now != "DATA-FM"; {
-	case data && b.Lower:
+	mode := ft710.DATAU
+	if b.Lower {
 		mode = ft710.DATAL
-	case data:
-		mode = ft710.DATAU
-	case b.Lower:
-		mode = ft710.LSB
 	}
 	fa, err := ft710.SetFreqA(b.FreqHz)
 	if err == nil {
@@ -226,8 +222,17 @@ func (r *rigConn) tune(band string) error {
 		return err
 	}
 	r.poll(gen) // read it back: the page shows what the radio says, not what we asked
-	if got := r.status().FreqHz; got != b.FreqHz {
+	want := ft710.ModeName(mode)
+	if st := r.status(); st.Mode != want && st.FreqHz == b.FreqHz { // give a slow radio one more look
+		time.Sleep(150 * time.Millisecond)
+		r.poll(gen)
+	}
+	st := r.status()
+	if st.FreqHz != b.FreqHz {
 		return fmt.Errorf("the radio didn't move to %s (it may not cover that band, or it's transmitting)", band)
+	}
+	if st.Mode != want {
+		return fmt.Errorf("the radio is on %s but didn't switch to %s (it shows %s)", band, want, st.Mode)
 	}
 	return nil
 }

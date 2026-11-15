@@ -126,7 +126,7 @@ function renderRadio(s) {
     for (const b of s.bands) {
       const el = document.createElement("button");
       el.className = "band"; el.textContent = b.name; el.dataset.hz = b.freqHz;
-      el.title = `${mhz(b.freqHz)} ${b.lower ? "LSB" : "USB"}`;
+      el.title = `${mhz(b.freqHz)} ${b.lower ? "DATA-L" : "DATA-U"}`;
       el.addEventListener("click", async () => {
         $("band-msg").textContent = "";
         try { render(await api("/api/rig/tune", "POST", { band: b.name })); }

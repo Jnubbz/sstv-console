@@ -32,7 +32,7 @@ Early days. In place now:
 - [x] Radio panel: pick the radio's sound input, connect CAT (frequency and mode in the top bar)
 - [x] Live receive: waterfall, the picture as it arrives, finished pictures saved to
       `Pictures/SSTV Console` and listed
-- [x] Band buttons: one click to each band's SSTV frequency and sideband
+- [x] Band buttons: one click to each band's SSTV frequency, switching the radio to DATA-U (DATA-L on 80 and 40 m) from whatever mode it was in
 - [x] Locks onto a picture already under way (no start tones needed)
 - [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
       CAT with a watchdog; sent pictures are listed with the received ones

@@ -133,10 +133,14 @@ func TestTuneToSSTVFrequencies(t *testing.T) {
 	for _, c := range []struct {
 		band, before, freq, mode string
 	}{
-		{"40m", "2", "007171000", "1"}, // voice: lower sideband on 40
-		{"20m", "1", "014230000", "2"}, // and upper on 20
-		{"80m", "C", "003845000", "8"}, // a radio in DATA-U stays in DATA: DATA-L
+		{"40m", "2", "007171000", "8"}, // from USB: DATA-L on 40
+		{"20m", "1", "014230000", "C"}, // from LSB: DATA-U on 20
+		{"80m", "C", "003845000", "8"}, // DATA-U to DATA-L
 		{"10m", "8", "028680000", "C"},
+		{"15m", "3", "021340000", "C"}, // from CW
+		{"6m", "4", "050680000", "C"},  // from FM
+		{"20m", "5", "014230000", "C"}, // from AM
+		{"40m", "9", "007171000", "8"}, // from RTTY
 	} {
 		radio.mode = c.before
 		r.poll(r.gen)
@@ -147,8 +151,18 @@ func TestTuneToSSTVFrequencies(t *testing.T) {
 			t.Errorf("%s from mode %s: radio at %s mode %s, want %s mode %s", c.band, c.before, radio.freq, radio.mode, c.freq, c.mode)
 		}
 	}
-	if st := r.status(); st.FreqHz != 28680000 || st.Mode != "DATA-U" {
+	if st := r.status(); st.FreqHz != 7171000 || st.Mode != "DATA-L" {
 		t.Errorf("status %+v", st)
+	}
+	// a radio that won't change mode is reported, not papered over
+	stuck := &stuckModeRadio{tunableRadio{freq: "014074000", mode: "3"}}
+	r2 := newRig()
+	r2.open = func(string, int) (catPort, error) { return stuck, nil }
+	if err := r2.connect("port", 38400); err != nil {
+		t.Fatal(err)
+	}
+	if err := r2.tune("20m"); err == nil || !strings.Contains(err.Error(), "didn't switch") {
+		t.Errorf("stuck mode: %v", err)
 	}
 	if err := r.tune("17m"); err == nil {
 		t.Error("tuned to a band with no SSTV frequency")
@@ -178,4 +192,15 @@ func TestReceiverJoinsAndRecords(t *testing.T) {
 	if st, err := os.Stat(rec); err != nil || st.Size() != 44+60*48000*2 {
 		t.Fatalf("recording %q: %v", rec, err)
 	}
+}
+
+// A radio that takes a new frequency but ignores mode changes.
+type stuckModeRadio struct{ tunableRadio }
+
+func (f *stuckModeRadio) Write(cmd string) error {
+	if strings.HasPrefix(cmd, "MD0") {
+		f.sent = append(f.sent, cmd)
+		return nil
+	}
+	return f.tunableRadio.Write(cmd)
 }
