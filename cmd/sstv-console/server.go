@@ -253,14 +253,62 @@ func (a *App) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/tx/photo", func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(io.LimitReader(r.Body, 30<<20))
+		var id string
 		if err == nil {
-			err = savePhoto(a.dir, b)
+			id, err = addPhoto(a.dir, b)
 		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		a.set.update(func(s *Settings) { s.PhotoID = id })
+		writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	})
+	mux.HandleFunc("GET /api/photos", func(w http.ResponseWriter, r *http.Request) {
+		s := a.set.get()
+		if s.PhotoID == "" { // a photo from before there was a library: bring it in
+			if b, err := os.ReadFile(photoPath(a.dir)); err == nil {
+				if id, err := addPhoto(a.dir, b); err == nil {
+					savePhotoView(a.dir, id, s.PhotoView)
+					a.set.update(func(s *Settings) { s.PhotoID = id })
+					s.PhotoID = id
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"current": s.PhotoID, "photos": listPhotos(a.dir)})
+	})
+	mux.HandleFunc("GET /api/photo/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		ext := ""
+		if strings.HasSuffix(id, ".thumb") {
+			id, ext = strings.TrimSuffix(id, ".thumb"), ".thumb"
+		}
+		if !photoIDRe.MatchString(id) {
+			http.NotFound(w, r)
+			return
+		}
+		b, err := os.ReadFile(photoFile(a.dir, id, ext))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", http.DetectContentType(b))
+		w.Write(b)
+	})
+	mux.HandleFunc("POST /api/tx/photo/use", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		view, err := usePhoto(a.dir, id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		a.set.update(func(s *Settings) {
+			s.PhotoID = id
+			if view != "" && len(view) <= 200 && json.Valid([]byte(view)) {
+				s.PhotoView = view
+			}
+		})
+		writeJSON(w, http.StatusOK, map[string]string{"view": view})
 	})
 	mux.HandleFunc("GET /api/tx/photo", func(w http.ResponseWriter, r *http.Request) {
 		b, err := os.ReadFile(photoPath(a.dir))
@@ -310,6 +358,9 @@ func (a *App) handler() http.Handler {
 			}
 			if req.NoTextBar != nil {
 				s.NoTextBar = *req.NoTextBar
+			}
+			if req.PhotoView != nil && s.PhotoID != "" {
+				savePhotoView(a.dir, s.PhotoID, s.PhotoView)
 			}
 			if req.TxLevel != nil && *req.TxLevel >= 1 && *req.TxLevel <= 100 {
 				s.TxLevel = *req.TxLevel

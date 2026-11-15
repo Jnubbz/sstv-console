@@ -366,7 +366,7 @@ let viewTimer = 0;
 function viewChanged() {
   draw();
   clearTimeout(viewTimer); // save once the dragging stops
-  viewTimer = setTimeout(() => saveStation({ PhotoView: JSON.stringify(view) }), 600);
+  viewTimer = setTimeout(() => { viewTimer = 0; saveStation({ PhotoView: JSON.stringify(view) }); }, 600);
 }
 function resetView() { Object.assign(view, { zoom: 1, x: 0, y: 0, bright: 1, contrast: 1 }); showView(); }
 const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -411,6 +411,7 @@ function renderStation(s) {
     const img = new Image();
     img.onload = () => { photo = img; draw(); };
     img.src = "/api/tx/photo";
+    refreshPhotos();
     setTemplate("cq");
   }
   const t = s.tx;
@@ -551,14 +552,65 @@ function draw() {
   line($("tx-bottom").value, false, look.bottom);
 }
 
+async function flushView() { // a framing change still waiting to be saved goes to the photo it was made on
+  if (!viewTimer) return;
+  clearTimeout(viewTimer); viewTimer = 0;
+  await saveStation({ PhotoView: JSON.stringify(view) });
+}
+
+function showPhoto(url) {
+  const img = new Image();
+  img.onload = () => { photo = img; draw(); };
+  img.src = url;
+}
+
+async function refreshPhotos() {
+  let r;
+  try { r = await api("/api/photos"); } catch { return; }
+  const strip = $("photo-strip");
+  strip.replaceChildren();
+  strip.hidden = r.photos.length < 2;
+  for (const p of r.photos) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "thumb" + (p.id === r.current ? " on" : "");
+    b.title = "Use this photo"; b.setAttribute("aria-label", "Use this photo");
+    const im = document.createElement("img");
+    im.src = "/api/photo/" + p.id + ".thumb"; im.alt = ""; im.draggable = false;
+    b.appendChild(im);
+    b.addEventListener("click", () => usePhoto(p.id));
+    strip.appendChild(b);
+  }
+}
+
+async function usePhoto(id) {
+  try {
+    await flushView();
+    const r = await api("/api/tx/photo/use?id=" + id, "POST");
+    try {
+      const v = JSON.parse(r.view || "{}");
+      view.zoom = clampN(Number(v.zoom) || 1, 1, 4); view.x = clampN(Number(v.x) || 0, -1, 1); view.y = clampN(Number(v.y) || 0, -1, 1);
+      view.bright = clampN(Number(v.bright) || 1, 0.5, 1.5); view.contrast = clampN(Number(v.contrast) || 1, 0.5, 1.5);
+    } catch { resetView(); }
+    showView();
+    showPhoto("/api/tx/photo?" + Date.now());
+    refreshPhotos();
+  } catch (e) { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; }
+}
+
 $("tx-file").addEventListener("change", async () => {
   const f = $("tx-file").files[0];
   if (!f) return;
   const img = new Image();
-  img.onload = () => { photo = img; resetView(); viewChanged(); };
+  img.onload = () => { photo = img; resetView(); draw(); };
   img.onerror = () => { $("tx-msg").className = "small err"; $("tx-msg").textContent = "That file isn't a JPEG or PNG picture."; };
   img.src = URL.createObjectURL(f);
-  api("/api/tx/photo", "POST", await f.arrayBuffer()).catch((e) => { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; });
+  try {
+    await flushView(); // (nothing is saved for the new photo until the library has it)
+    await api("/api/tx/photo", "POST", await f.arrayBuffer());
+    viewChanged(); // saves the fresh framing under the new photo
+    refreshPhotos();
+  } catch (e) { $("tx-msg").className = "small err"; $("tx-msg").textContent = e.message; }
+  $("tx-file").value = ""; // so picking the same file again still counts
 });
 
 // framing the photo: drag to move, wheel or slider to zoom
