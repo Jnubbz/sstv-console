@@ -122,6 +122,7 @@ function renderRadio(s) {
   // band buttons: one per band, lit when the radio is on that band's SSTV frequency
   const bands = $("bands");
   bands.hidden = !rig.connected;
+  $("tune-btn").hidden = !rig.connected;
   if (!bands.children.length) {
     for (const b of s.bands) {
       const el = document.createElement("button");
@@ -416,10 +417,16 @@ function renderStation(s) {
   }
   const t = s.tx;
   $("tx-go").disabled = t.keyed; $("tx-stop").disabled = !t.keyed;
+  const tuning = t.keyed && t.mode === "Tune";
+  $("tune-btn").classList.toggle("on", tuning);
+  $("tune-btn").textContent = tuning ? "Stop" : "Tune";
+  $("tune-btn").disabled = t.keyed && !tuning; // not while a picture is going out
+  for (const b of $("bands").children) b.disabled = t.keyed;
+  if (tuning) $("band-msg").textContent = "";
   if (t.keyed) {
     $("tx-bar").style.width = Math.min(100, 100 * t.elapsed / t.seconds) + "%";
     $("tx-msg").className = "small muted";
-    $("tx-msg").textContent = `Transmitting ${t.mode}: ${Math.max(0, Math.round(t.seconds - t.elapsed))} s left` + (t.ptt ? "" : " (no radio connected: audio only, nothing is keyed)");
+    $("tx-msg").textContent = tuning ? `Tuning carrier: ${Math.max(0, Math.round(t.seconds - t.elapsed))} s left` : `Transmitting ${t.mode}: ${Math.max(0, Math.round(t.seconds - t.elapsed))} s left` + (t.ptt ? "" : " (no radio connected: audio only, nothing is keyed)");
   } else if (!player) $("tx-bar").style.width = "0";
   if (t.error) { $("tx-msg").className = "small err"; $("tx-msg").textContent = t.error; }
 }
@@ -658,6 +665,25 @@ $("viewer-call").addEventListener("change", () => {
   if (!shown) return;
   shown.call = $("viewer-call").value.toUpperCase();
   api("/api/picture/call", "POST", { ID: shown.id, Call: shown.call }).catch(() => {});
+});
+
+// Tune: a steady carrier for the antenna tuner, a few seconds at most; press again to stop.
+$("tune-btn").addEventListener("click", async () => {
+  const msg = $("band-msg");
+  if (last && last.tx.keyed && last.tx.mode === "Tune") return stopTx(true);
+  msg.className = "small muted"; msg.textContent = "";
+  $("tune-btn").disabled = true;
+  try {
+    const p = await api("/api/tx/tune", "POST");
+    const el = new Audio(`/api/tx/audio.wav?id=${p.id}`);
+    el.preload = "auto";
+    await route(el);
+    await new Promise((ok, bad) => { el.oncanplaythrough = ok; el.onerror = () => bad(new Error("couldn't load the audio")); el.load(); });
+    render(await api(`/api/tx/key?id=${p.id}`, "POST"));
+    player = el;
+    el.onended = () => { if (player === el) stopTx(false); };
+    try { await el.play(); } catch (e) { await stopTx(true); throw new Error("couldn't play the audio: " + e.message); }
+  } catch (e) { msg.className = "small err"; msg.textContent = e.message; $("tune-btn").disabled = false; }
 });
 
 async function stopTx(stopped) {

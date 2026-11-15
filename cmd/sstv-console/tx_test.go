@@ -114,3 +114,58 @@ func TestNoRadioPlaysAudioOnly(t *testing.T) {
 	}
 	a.tx.unkey(0, true)
 }
+
+// Tune keys the radio for a steady tone, sends no picture, and the watchdog still unkeys it.
+func TestTuneKeysACarrierAndSendsNoPicture(t *testing.T) {
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
+	radio := &tunableRadio{freq: "007171000", mode: "8"}
+	a.rig.open = func(string, int) (catPort, error) { return radio, nil }
+	if err := a.rig.connect("port", 38400); err != nil {
+		t.Fatal(err)
+	}
+	var fire func()
+	var wait time.Duration
+	a.tx.after = func(d time.Duration, f func()) *time.Timer { wait, fire = d, f; return time.NewTimer(time.Hour) }
+	id, secs, err := a.tx.prepareTune()
+	if err != nil || secs < tuneSeconds || secs > tuneSeconds+1 {
+		t.Fatalf("prepare: %v, %.1f s", err, secs)
+	}
+	wav := a.tx.audio(id)
+	if len(wav) != 44+int(secs*txRate+0.5)*2 {
+		t.Fatalf("audio is %d bytes", len(wav))
+	}
+	// the tone is 1000 Hz: count rising zero crossings in the middle second
+	mid := 44 + 2*txRate*5
+	cross := 0
+	prev := int16(uint16(wav[mid]) | uint16(wav[mid+1])<<8)
+	for i := 1; i < txRate; i++ {
+		v := int16(uint16(wav[mid+2*i]) | uint16(wav[mid+2*i+1])<<8)
+		if prev < 0 && v >= 0 {
+			cross++
+		}
+		prev = v
+	}
+	if cross < 995 || cross > 1005 {
+		t.Fatalf("%d cycles in a second, want 1000", cross)
+	}
+	if err := a.tx.key(id); err != nil {
+		t.Fatal(err)
+	}
+	if st := a.tx.status(); !st.Keyed || st.Mode != "Tune" || !st.PTT {
+		t.Fatalf("status %+v", st)
+	}
+	if wait < tuneSeconds*time.Second || wait > (tuneSeconds+3)*time.Second {
+		t.Fatalf("watchdog set for %v", wait)
+	}
+	if _, _, err := a.tx.prepareTune(); err == nil {
+		t.Fatal("a second carrier while keyed")
+	}
+	a.tx.since = time.Now().Add(-time.Duration(secs * float64(time.Second)))
+	fire()
+	if got := radio.sent[len(radio.sent)-1]; got != "TX0;" || a.tx.isKeyed() {
+		t.Fatalf("after the watchdog the radio got %q", got)
+	}
+	if n := len(a.rx.pictures()); n != 0 {
+		t.Fatalf("a tuning carrier was filed as a picture (%d)", n)
+	}
+}

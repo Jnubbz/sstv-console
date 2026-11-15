@@ -215,6 +215,14 @@ func (a *App) handler() http.Handler {
 		a.set.update(func(s *Settings) { s.AudioDevice, s.AudioLabel = req.ID, req.Label })
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/tx/tune", func(w http.ResponseWriter, r *http.Request) {
+		id, secs, err := a.tx.prepareTune()
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "seconds": secs})
+	})
 	mux.HandleFunc("POST /api/tx/prepare", func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 		if err != nil {

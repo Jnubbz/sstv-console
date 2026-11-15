@@ -26,8 +26,8 @@ const txRate = 48000
 
 type txStatus struct {
 	Keyed   bool    `json:"keyed"`
-	PTT     bool    `json:"ptt"` // the radio was keyed over CAT (false: audio only, e.g. VOX)
-	Mode    string  `json:"mode,omitempty"`
+	PTT     bool    `json:"ptt"`            // the radio was keyed over CAT (false: audio only, e.g. VOX)
+	Mode    string  `json:"mode,omitempty"` // "Tune" for a tuning carrier
 	Seconds float64 `json:"seconds,omitempty"`
 	Elapsed float64 `json:"elapsed,omitempty"`
 	Error   string  `json:"error,omitempty"`
@@ -42,6 +42,7 @@ type transmitter struct {
 	call    string
 	seconds float64
 	keyed   bool
+	tune    bool // the carrier for the antenna tuner, not a picture
 	ptt     bool
 	since   time.Time
 	timer   *time.Timer
@@ -84,7 +85,24 @@ func (t *transmitter) prepare(pic []byte, mode, to string) (int, float64, error)
 		return 0, 0, errors.New("that isn't a picture this can send")
 	}
 	audio := sstv.Encode(img, m, txRate)
-	// a short quiet lead-in (the radio's relay settles) and tail
+	w, total := wavWithLeadIn(audio)
+	var sent bytes.Buffer // what goes on the air: the picture at the mode's size
+	png.Encode(&sent, sstv.Resize(img, m.Width, m.Height))
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.keyed {
+		return 0, 0, errors.New("already transmitting")
+	}
+	t.id++
+	t.wav, t.png, t.mode, t.call, t.tune = w, sent.Bytes(), m, to, false
+	t.seconds = total
+	return t.id, t.seconds, nil
+}
+
+// wavWithLeadIn: 16-bit mono WAV of audio, with a short quiet lead-in (the radio's relay
+// settles) and tail. It returns the file and its length in seconds.
+func wavWithLeadIn(audio []float32) ([]byte, float64) {
 	lead, tail := txRate*3/10, txRate/10
 	n := (lead + len(audio) + tail) * 2
 	w := make([]byte, 44, 44+n)
@@ -105,18 +123,38 @@ func (t *transmitter) prepare(pic []byte, mode, to string) (int, float64, error)
 		w = binary.LittleEndian.AppendUint16(w, uint16(int16(math.Round(float64(s)*32767))))
 	}
 	w = append(w, make([]byte, tail*2)...)
-	var sent bytes.Buffer // what goes on the air: the picture at the mode's size
-	png.Encode(&sent, sstv.Resize(img, m.Width, m.Height))
+	return w, float64(lead+len(audio)+tail) / txRate
+}
 
+// A tuning carrier: a steady tone for the antenna tuner to tune on. Same level as the
+// pictures (0.8 of full scale), so the radio's power setting means the same thing.
+const (
+	tuneSeconds = 10
+	tuneTone    = 1000.0 // Hz, so the carrier sits 1 kHz above the dial frequency in DATA-U
+)
+
+func (t *transmitter) prepareTune() (int, float64, error) {
+	audio := make([]float32, tuneSeconds*txRate)
+	ramp := txRate / 50 // 20 ms in and out: no clicks
+	for i := range audio {
+		g := 1.0
+		if i < ramp {
+			g = float64(i) / float64(ramp)
+		} else if i > len(audio)-ramp {
+			g = float64(len(audio)-i) / float64(ramp)
+		}
+		audio[i] = float32(0.8 * g * math.Sin(2*math.Pi*tuneTone*float64(i)/txRate))
+	}
+	w, secs := wavWithLeadIn(audio)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.keyed {
 		return 0, 0, errors.New("already transmitting")
 	}
 	t.id++
-	t.wav, t.png, t.mode, t.call = w, sent.Bytes(), m, to
-	t.seconds = float64(lead+len(audio)+tail) / txRate
-	return t.id, t.seconds, nil
+	t.wav, t.png, t.mode, t.call, t.tune = w, nil, &sstv.Mode{Name: "Tune"}, "", true
+	t.seconds = secs
+	return t.id, secs, nil
 }
 
 func (t *transmitter) audio(id int) []byte {
@@ -176,10 +214,10 @@ func (t *transmitter) unkey(id int, stopped bool) {
 		}
 	}
 	whole := !stopped && time.Since(t.since).Seconds() > t.seconds-1
-	pic, m, to := t.png, t.mode, t.call
+	pic, m, to, tune := t.png, t.mode, t.call, t.tune
 	t.keyed = false
 	t.mu.Unlock()
-	if whole && t.onSent != nil {
+	if whole && !tune && t.onSent != nil {
 		t.onSent(pic, m, to)
 	}
 	if t.onEnd != nil {

@@ -173,3 +173,7 @@ button, input, select, textarea { font-feature-settings: "zero" 1; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb:hover { border-color: #5B9BFF; }
 .thumb.on { border-color: var(--blue); }
+.band.tune { border-color: var(--tx); color: var(--tx); font-weight: 600; }
+.band.tune:hover { border-color: var(--tx); background: rgba(255, 163, 26, 0.12); }
+.band.tune.on { background: var(--tx); border-color: var(--tx); color: #1A1206; }
+.band:disabled { opacity: 0.4; cursor: default; }
