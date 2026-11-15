@@ -314,6 +314,33 @@ $("hello-btn").addEventListener("click", () => toggleRadio(true));
 $("rec-btn").addEventListener("click", () => api("/api/rx/record", "POST").then(render).catch(() => {}));
 $("rx-reset").addEventListener("click", () => api("/api/rx/reset", "POST").then(render).catch(() => {}));
 
+// Save keeps a picture in the Pictures folder; Delete throws an unsaved one away.
+async function pictureAction(path, ok) {
+  if (!shown) return;
+  const id = shown.id, say = (t, bad) => { $("save-msg").className = "small " + (bad ? "err" : "muted"); $("save-msg").textContent = t; };
+  try {
+    await api(path, "POST", { ID: id });
+    if (ok) say(ok);
+  } catch (e) { return say(e.message, true); }
+  await loadPictures(false);
+}
+$("save-btn").addEventListener("click", async () => {
+  const id = shown && shown.id;
+  await pictureAction("/api/picture/save");
+  const p = lastList.find((x) => x.id === id);
+  if (p) show(p);
+});
+$("delete-btn").addEventListener("click", async () => {
+  const id = shown && shown.id;
+  await pictureAction("/api/picture/delete");
+  if (lastList.some((x) => x.id === id)) return; // it wasn't deleted: the message says why
+  shown = null; selected = null;
+  $("viewer").hidden = true; $("viewer-empty").hidden = false;
+});
+$("reveal-btn").addEventListener("click", () => {
+  if (shown) api("/api/picture/reveal", "POST", { ID: shown.id }).catch((e) => { $("save-msg").className = "small err"; $("save-msg").textContent = e.message; });
+});
+
 function when(iso) {
   const d = new Date(iso), today = new Date().toDateString() === d.toDateString();
   return (today ? "" : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " ") + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -323,15 +350,19 @@ function show(p) {
   selected = p.id; shown = p;
   $("viewer-empty").hidden = true; $("viewer").hidden = false; $("composer").hidden = true;
   $("viewer-call").value = p.call || ""; $("reply-btn").hidden = !!p.sent;
+  $("save-btn").hidden = !!p.saved; $("delete-btn").hidden = !!p.saved; $("reveal-btn").hidden = !p.saved;
+  $("save-msg").className = "small muted"; $("save-msg").textContent = p.saved ? "Saved in your Pictures folder." : "";
   $("viewer-img").src = "/api/picture/" + encodeURIComponent(p.id) + ".png";
   $("viewer-img").alt = "Received picture, " + p.mode;
   $("viewer-cap").textContent = [when(p.time), p.mode, p.freqHz ? mhz(p.freqHz) + " MHz" : "", `${p.w}×${p.h}`].filter(Boolean).join(" · ");
   for (const b of document.querySelectorAll(".pic")) b.classList.toggle("on", b.dataset.id === p.id);
 }
 
+let lastList = [], newestId = "";
 async function loadPictures(showNewest) {
   let list;
   try { list = await api("/api/pictures"); } catch { return; }
+  lastList = list;
   $("inbox-empty").hidden = list.length > 0;
   $("pic-count").textContent = list.length ? String(list.length) : "";
   const ul = $("pics");
@@ -344,10 +375,13 @@ async function loadPictures(showNewest) {
     const a = document.createElement("strong"), c = document.createElement("span");
     a.textContent = p.call || when(p.time);
     if (p.sent) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "Sent"; a.append(tag); }
+    if (p.saved) { const tag = document.createElement("span"); tag.className = "tag tag-ok"; tag.textContent = "Saved"; a.append(tag); }
     c.className = "muted small"; c.textContent = [p.call ? when(p.time) : "", p.mode, p.freqHz ? mhz(p.freqHz) : ""].filter(Boolean).join(" · ");
     t.append(a, c); b.append(img, t); b.addEventListener("click", () => show(p)); li.append(b); ul.append(li);
   }
-  if (showNewest && list.length && picsV > 0 && $("composer").hidden) show(list[0]); // a picture just arrived
+  const fresh = list.length > 0 && list[0].id !== newestId; // not just a Save, a Delete or an expiry
+  newestId = list.length ? list[0].id : "";
+  if (showNewest && fresh && picsV > 0 && $("composer").hidden) show(list[0]); // a picture just arrived
 }
 
 // ---- sending ----

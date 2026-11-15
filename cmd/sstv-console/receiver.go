@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -31,8 +32,9 @@ type Picture struct {
 	Synced int     `json:"synced"`
 	W      int     `json:"w"`
 	H      int     `json:"h"`
-	Sent   bool    `json:"sent,omitempty"` // one of mine
-	Call   string  `json:"call,omitempty"` // the other station
+	Sent   bool    `json:"sent,omitempty"`  // one of mine
+	Saved  bool    `json:"saved,omitempty"` // copied to the Pictures folder by the user
+	Call   string  `json:"call,omitempty"`  // the other station
 }
 
 type rxStatus struct {
@@ -70,7 +72,8 @@ type receiver struct {
 	st        rxStatus
 	live      *image.RGBA // a copy of the picture in progress (or the last one)
 	pics      []Picture   // newest first
-	picDir    string
+	picDir    string      // the user's Pictures folder: only what they save goes here
+	inboxDir  string      // everything received (and sent) waits here until saved, deleted or expired
 	indexPath string
 	rec       []int16 // a test recording in progress
 	recLeft   int     // samples still to record
@@ -80,23 +83,119 @@ type receiver struct {
 	now       func() time.Time
 }
 
+// unsavedKeep: how long a picture that was never saved or deleted stays in the list.
+const unsavedKeep = 7 * 24 * time.Hour
+
 func newReceiver(dir, picDir string, freq func() int) *receiver {
-	r := &receiver{picDir: picDir, indexPath: filepath.Join(dir, "received.json"), freq: freq, now: time.Now}
-	os.MkdirAll(picDir, 0o755)
+	r := &receiver{picDir: picDir, inboxDir: filepath.Join(dir, "inbox"), indexPath: filepath.Join(dir, "received.json"), freq: freq, now: time.Now}
+	os.MkdirAll(r.inboxDir, 0o755)
 	if b, err := os.ReadFile(r.indexPath); err == nil {
 		json.Unmarshal(b, &r.pics)
 	}
-	kept := r.pics[:0] // drop entries whose file the user deleted
+	kept := r.pics[:0]
 	for _, p := range r.pics {
-		if _, err := os.Stat(r.file(p.ID)); err == nil {
+		if _, err := os.Stat(filepath.Join(r.inboxDir, p.ID+".png")); err == nil {
+			kept = append(kept, p) // waiting in the inbox
+		} else if _, err := os.Stat(filepath.Join(r.picDir, p.ID+".png")); err == nil {
+			p.Saved = true // from before there was an inbox, or saved: it's in the Pictures folder
 			kept = append(kept, p)
-		}
+		} // else: the file is gone (the user deleted it)
 	}
 	r.pics = kept
+	r.expire()
 	return r
 }
 
-func (r *receiver) file(id string) string { return filepath.Join(r.picDir, id+".png") }
+// file: where a picture is now (the inbox, or the Pictures folder once saved).
+func (r *receiver) file(id string) string {
+	if p := filepath.Join(r.inboxDir, id+".png"); fileExists(p) {
+		return p
+	}
+	return filepath.Join(r.picDir, id+".png")
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// expire drops unsaved pictures older than unsavedKeep. Called with the lock held (or at start).
+func (r *receiver) expire() {
+	kept, changed := r.pics[:0], false
+	for _, p := range r.pics {
+		if t, err := time.Parse(time.RFC3339, p.Time); err == nil && !p.Saved && r.now().Sub(t) > unsavedKeep {
+			os.Remove(filepath.Join(r.inboxDir, p.ID+".png"))
+			changed = true
+			continue
+		}
+		kept = append(kept, p)
+	}
+	r.pics = kept
+	if changed {
+		r.st.PicturesV++
+		r.writeIndex()
+	}
+}
+
+// savePicture copies a picture into the Pictures folder. It returns the file's path.
+func (r *receiver) savePicture(id string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.pics {
+		if r.pics[i].ID != id {
+			continue
+		}
+		dst := filepath.Join(r.picDir, id+".png")
+		if r.pics[i].Saved {
+			return dst, nil
+		}
+		b, err := os.ReadFile(filepath.Join(r.inboxDir, id+".png"))
+		if err == nil {
+			if err = os.MkdirAll(r.picDir, 0o755); err == nil {
+				err = os.WriteFile(dst, b, 0o644)
+			}
+		}
+		if err != nil {
+			return "", fmt.Errorf("couldn't save it: %v", err)
+		}
+		os.Remove(filepath.Join(r.inboxDir, id+".png"))
+		r.pics[i].Saved = true
+		r.st.PicturesV++
+		r.writeIndex()
+		return dst, nil
+	}
+	return "", errors.New("that picture isn't in the list")
+}
+
+// deletePicture throws away a picture that wasn't saved. Saved ones are the user's files:
+// they delete those themselves.
+func (r *receiver) deletePicture(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, p := range r.pics {
+		if p.ID != id {
+			continue
+		}
+		if p.Saved {
+			return errors.New("that picture is saved in your Pictures folder: delete the file there")
+		}
+		os.Remove(filepath.Join(r.inboxDir, id+".png"))
+		r.pics = append(r.pics[:i], r.pics[i+1:]...)
+		r.st.PicturesV++
+		r.writeIndex()
+		return nil
+	}
+	return errors.New("that picture isn't in the list")
+}
+
+// savedPath: where a saved picture is ("" if it isn't saved).
+func (r *receiver) savedPath(id string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.pics {
+		if p.ID == id && p.Saved {
+			return filepath.Join(r.picDir, id+".png")
+		}
+	}
+	return ""
+}
 
 func (r *receiver) status() rxStatus {
 	r.mu.Lock()
@@ -247,13 +346,14 @@ func (r *receiver) addSent(pic []byte, m *sstv.Mode, to string) {
 	if hz > 0 {
 		id += fmt.Sprintf(" %d kHz", hz/1000)
 	}
-	if err := os.WriteFile(r.file(id), pic, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(r.inboxDir, id+".png"), pic, 0o644); err != nil {
 		r.st.Note = "Couldn't save the sent picture: " + err.Error()
 		return
 	}
 	r.pics = append([]Picture{{ID: id, Time: t.Format(time.RFC3339), Mode: m.Name, FreqHz: hz, W: m.Width, H: m.Height,
 		Sent: true, Call: to}}, r.pics...)
 	r.st.PicturesV++
+	r.expire()
 	r.writeIndex()
 }
 
@@ -279,7 +379,7 @@ func (r *receiver) save(e sstv.Event) {
 		}
 		return c
 	}, id)
-	f, err := os.Create(r.file(id))
+	f, err := os.Create(filepath.Join(r.inboxDir, id+".png"))
 	if err != nil {
 		r.st.Note = "Couldn't save the picture: " + err.Error()
 		return
@@ -296,6 +396,7 @@ func (r *receiver) save(e sstv.Event) {
 		Slant: math.Round(e.SlantPPM), Synced: e.Synced, W: e.Image.Bounds().Dx(), H: e.Image.Bounds().Dy()}
 	r.pics = append([]Picture{p}, r.pics...)
 	r.st.PicturesV++
+	r.expire()
 	r.writeIndex()
 }
 
@@ -319,6 +420,7 @@ func (r *receiver) finishRecording() {
 	if hz := r.freq(); hz > 0 {
 		name += fmt.Sprintf(" %d kHz", hz/1000)
 	}
+	os.MkdirAll(r.picDir, 0o755)
 	path := filepath.Join(r.picDir, name+".wav")
 	if want := recordSeconds * r.recRate; len(r.rec) > want {
 		r.rec = r.rec[:want]

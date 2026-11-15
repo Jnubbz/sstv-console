@@ -30,8 +30,10 @@ Early days. In place now:
       PD120/180/240, with header (VIS) detection, off-tune correction and slant correction.
       `cmd/sstv-file` runs it on WAV files
 - [x] Radio panel: pick the radio's sound input, connect CAT (frequency and mode in the top bar)
-- [x] Live receive: waterfall, the picture as it arrives, finished pictures saved to
-      `Pictures/SSTV Console` and listed
+- [x] Live receive: waterfall, the picture as it arrives, finished pictures listed in the
+      app. Nothing is written to your Pictures folder until you press Save (then it goes
+      to `Pictures/SSTV Console`); Delete throws one away, and pictures you never save or
+      delete are cleared after a week
 - [x] Tune button: a 10-second steady carrier for the antenna tuner
 - [x] Band buttons: one click to each band's SSTV frequency, switching the radio to DATA-U (DATA-L on 80 and 40 m) from whatever mode it was in
 - [x] Locks onto a picture already under way (no start tones needed)

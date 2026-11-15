@@ -159,6 +159,45 @@ func (a *App) handler() http.Handler {
 		w.Header().Set("Content-Type", "image/png")
 		http.ServeFile(w, r, a.rx.file(id))
 	})
+	mux.HandleFunc("POST /api/picture/save", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || !a.rx.has(req.ID) {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if _, err := a.rx.savePicture(req.ID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/picture/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := a.rx.deletePicture(req.ID); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// show a saved picture in Finder/Explorer; with no id, open the Pictures folder
+	mux.HandleFunc("POST /api/picture/reveal", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+		path, dir := a.rx.savedPath(req.ID), false
+		if path == "" {
+			path, dir = a.rx.picDir, true
+			os.MkdirAll(path, 0o755)
+		}
+		if err := reveal(path, dir); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "couldn't open it: " + err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /api/ports", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ports": serial.List(), "bauds": serial.Bauds})
 	})

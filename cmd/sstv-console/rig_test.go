@@ -82,8 +82,12 @@ func TestReceiverSavesAPicture(t *testing.T) {
 	if p.ID != "2026-11-14 174512Z Robot 36 14230 kHz" || p.Mode != "Robot 36" || p.FreqHz != 14230000 {
 		t.Fatalf("picture %+v", p)
 	}
-	if st, err := os.Stat(filepath.Join(pics, p.ID+".png")); err != nil || st.Size() < 1000 {
-		t.Fatalf("file: %v", err)
+	// nothing goes to the Pictures folder until the user saves it; the picture waits in the inbox
+	if ents, _ := os.ReadDir(pics); len(ents) != 0 {
+		t.Fatalf("a picture was saved without being asked: %v", ents)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "inbox", p.ID+".png")); err != nil || st.Size() < 1000 || p.Saved {
+		t.Fatalf("inbox file: %v (saved %v)", err, p.Saved)
 	}
 	if rx.livePNG() == nil || math.IsNaN(rx.status().LevelDB) {
 		t.Fatal("no live picture")
@@ -203,4 +207,86 @@ func (f *stuckModeRadio) Write(cmd string) error {
 		return nil
 	}
 	return f.tunableRadio.Write(cmd)
+}
+
+// Save copies to the Pictures folder, Delete only throws away what was never saved, and
+// pictures nobody touched expire after a week.
+func TestSaveDeleteAndExpire(t *testing.T) {
+	dir, pics := t.TempDir(), filepath.Join(t.TempDir(), "SSTV Console")
+	rx := newReceiver(dir, pics, func() int { return 14230000 })
+	now := time.Date(2026, 11, 14, 17, 0, 0, 0, time.UTC)
+	rx.now = func() time.Time { return now }
+	m := sstv.ByName("Robot 36")
+	card := sstv.TestCard(m.Width, m.Height)
+	for i := 0; i < 3; i++ { // three pictures a minute apart
+		rx.mu.Lock()
+		rx.save(sstv.Event{Mode: m, Image: card})
+		rx.mu.Unlock()
+		now = now.Add(time.Minute)
+	}
+	list := rx.pictures()
+	if len(list) != 3 {
+		t.Fatalf("%d pictures", len(list))
+	}
+	if _, err := os.Stat(pics); err == nil {
+		t.Fatal("the Pictures folder was made before anything was saved")
+	}
+	keep, bin, old := list[0].ID, list[1].ID, list[2].ID
+
+	path, err := rx.savePicture(keep)
+	if err != nil || path != filepath.Join(pics, keep+".png") {
+		t.Fatalf("save: %q %v", path, err)
+	}
+	if st, err := os.Stat(path); err != nil || st.Size() < 100 {
+		t.Fatalf("saved file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "inbox", keep+".png")); err == nil {
+		t.Fatal("still in the inbox after saving")
+	}
+	if rx.file(keep) != path || rx.savedPath(keep) != path || rx.savedPath(bin) != "" {
+		t.Fatal("wrong file for a saved / unsaved picture")
+	}
+	if p, err := rx.savePicture(keep); err != nil || p != path { // saving twice is harmless
+		t.Fatalf("save again: %q %v", p, err)
+	}
+	if rx.deletePicture(keep) == nil {
+		t.Fatal("deleted a saved picture")
+	}
+	if err := rx.deletePicture(bin); err != nil || rx.has(bin) {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "inbox", bin+".png")); err == nil {
+		t.Fatal("deleted picture's file is still there")
+	}
+	if _, err := rx.savePicture("nope"); err == nil {
+		t.Fatal("saved a picture that isn't listed")
+	}
+	// the list, saved flags included, survives a restart
+	again := newReceiver(dir, pics, func() int { return 0 })
+	if l := again.pictures(); len(l) != 2 || !l[0].Saved || l[1].Saved {
+		t.Fatalf("after restart: %+v", l)
+	}
+	// a week later: the unsaved one goes, the saved one stays
+	again.now = func() time.Time { return now.Add(unsavedKeep + time.Hour) }
+	again.mu.Lock()
+	again.expire()
+	again.mu.Unlock()
+	if l := again.pictures(); len(l) != 1 || l[0].ID != keep || again.has(old) {
+		t.Fatalf("after expiry: %+v", l)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "inbox", old+".png")); err == nil {
+		t.Fatal("expired picture's file is still there")
+	}
+}
+
+// Pictures from before there was an inbox are in the Pictures folder already: they come up saved.
+func TestOldPicturesCountAsSaved(t *testing.T) {
+	dir, pics := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(pics, "old.png"), []byte("png"), 0o644)
+	idx := `[{"id":"old","time":"2026-11-01T10:00:00Z","mode":"Robot 36","w":320,"h":240},{"id":"gone","time":"2026-11-01T11:00:00Z","mode":"Robot 36","w":320,"h":240}]`
+	os.WriteFile(filepath.Join(dir, "received.json"), []byte(idx), 0o644)
+	rx := newReceiver(dir, pics, func() int { return 0 })
+	if l := rx.pictures(); len(l) != 1 || l[0].ID != "old" || !l[0].Saved {
+		t.Fatalf("%+v", l)
+	}
 }

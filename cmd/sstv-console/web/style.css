@@ -177,3 +177,4 @@ button, input, select, textarea { font-feature-settings: "zero" 1; }
 .band.tune:hover { border-color: var(--tx); background: rgba(255, 163, 26, 0.12); }
 .band.tune.on { background: var(--tx); border-color: var(--tx); color: #1A1206; }
 .band:disabled { opacity: 0.4; cursor: default; }
+.tag-ok { background: rgba(92, 255, 122, 0.14); color: #7DE89A; }

@@ -108,7 +108,7 @@
   <nav class="pane inbox" aria-label="Received pictures">
     <div class="pane-head"><h2>Received</h2><span id="pic-count" class="muted small"></span></div>
     <div id="inbox-empty" class="empty">
-      <p>Pictures you receive land here and are saved to your Pictures folder.</p>
+      <p>Pictures you receive land here. Press Save to keep one in your Pictures folder; unsaved ones are cleared after a week.</p>
     </div>
     <ul id="pics" class="pics"></ul>
   </nav>
@@ -127,6 +127,12 @@
           <input id="viewer-call" class="short" autocomplete="off" spellcheck="false" maxlength="12" placeholder="e.g. W1AW">
         </label>
         <button id="reply-btn" class="btn btn-primary">Reply</button>
+      </div>
+      <div class="row center">
+        <button id="save-btn" class="btn">Save</button>
+        <button id="reveal-btn" class="btn" hidden>Show in folder</button>
+        <button id="delete-btn" class="btn">Delete</button>
+        <span id="save-msg" class="small muted"></span>
       </div>
     </figure>
     <section id="composer" class="composer" hidden aria-label="Picture to send">
