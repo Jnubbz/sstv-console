@@ -121,14 +121,13 @@ function renderRadio(s) {
   $("rig-text").textContent = rig.connected ? (rig.error || [rig.model, rig.mode].filter(Boolean).join(" · ")) : "No radio connected";
   // band buttons: one per band, lit when the radio is on that band's SSTV frequency
   const bands = $("bands");
-  for (const el of bands.children) el.title = bandTitle(el, s.settings.bandData);
   bands.hidden = !rig.connected;
   $("tune-btn").hidden = !rig.connected;
   if (!bands.children.length) {
     for (const b of s.bands) {
       const el = document.createElement("button");
       el.className = "band"; el.textContent = b.name; el.dataset.hz = b.freqHz;
-      el.dataset.lower = b.lower ? "1" : ""; el.title = bandTitle(el, s.settings.bandData);
+      el.title = `${mhz(b.freqHz)} ${b.lower ? "DATA-L" : "DATA-U"}`;
       el.addEventListener("click", async () => {
         $("band-msg").textContent = "";
         try { render(await api("/api/rig/tune", "POST", { band: b.name })); }
@@ -406,7 +405,6 @@ function renderStation(s) {
       view.bright = clampN(Number(v.bright) || 1, 0.5, 1.5); view.contrast = clampN(Number(v.contrast) || 1, 0.5, 1.5);
     } catch { /* keep the defaults */ }
     showView();
-    $("band-data").checked = !!s.settings.bandData;
     $("tx-textbar").checked = look.bar;
     $("tx-textbar").addEventListener("change", () => { look.bar = $("tx-textbar").checked; draw(); saveStation({ NoTextBar: !look.bar }); });
     if (!canSink) $("out-msg").textContent = "This system can't choose an output from inside the app: transmit audio plays on the computer's current sound output. Set that to the radio before transmitting.";
@@ -687,12 +685,6 @@ $("tune-btn").addEventListener("click", async () => {
     try { await el.play(); } catch (e) { await stopTx(true); throw new Error("couldn't play the audio: " + e.message); }
   } catch (e) { msg.className = "small err"; msg.textContent = e.message; $("tune-btn").disabled = false; }
 });
-
-function bandTitle(el, data) {
-  const mode = (data ? "DATA-" : "") + (el.dataset.lower ? (data ? "L" : "LSB") : (data ? "U" : "USB"));
-  return `${mhz(Number(el.dataset.hz))} ${mode}`;
-}
-$("band-data").addEventListener("change", () => saveStation({ BandData: $("band-data").checked }));
 
 async function stopTx(stopped) {
   if (player) { player.pause(); player = null; }

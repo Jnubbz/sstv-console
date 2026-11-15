@@ -195,7 +195,7 @@ func (a *App) handler() http.Handler {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "transmitting: change band when the picture has gone out"})
 			return
 		}
-		if err := a.rig.tune(req.Band, a.set.get().BandData); err != nil {
+		if err := a.rig.tune(req.Band); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
@@ -333,7 +333,7 @@ func (a *App) handler() http.Handler {
 			TopColor, BottomColor, MsgColor     *string
 			PhotoView                           *string
 			TxLevel                             *int
-			NoTextBar, BandData                 *bool
+			NoTextBar                           *bool
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -363,9 +363,6 @@ func (a *App) handler() http.Handler {
 			}
 			if req.PhotoView != nil && len(*req.PhotoView) <= 200 && json.Valid([]byte(*req.PhotoView)) {
 				s.PhotoView = *req.PhotoView
-			}
-			if req.BandData != nil {
-				s.BandData = *req.BandData
 			}
 			if req.NoTextBar != nil {
 				s.NoTextBar = *req.NoTextBar

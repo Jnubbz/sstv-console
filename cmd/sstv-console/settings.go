@@ -22,7 +22,6 @@ type Settings struct {
 	TopColor    string `json:"topColor"` // text colours, #RRGGBB
 	BottomColor string `json:"bottomColor"`
 	MsgColor    string `json:"msgColor"`
-	BandData    bool   `json:"bandData"`  // band buttons set DATA-U/DATA-L instead of USB/LSB
 	PhotoID     string `json:"photoID"`   // which library photo is current
 	PhotoView   string `json:"photoView"` // how my photo is framed (the page's own JSON)
 	NoTextBar   bool   `json:"noTextBar"` // leave out the dark bar behind the text

@@ -33,7 +33,7 @@ Early days. In place now:
 - [x] Live receive: waterfall, the picture as it arrives, finished pictures saved to
       `Pictures/SSTV Console` and listed
 - [x] Tune button: a 10-second steady carrier for the antenna tuner
-- [x] Band buttons: one click to each band's SSTV frequency, switching the radio from whatever mode it was in to USB (LSB on 80 and 40 m), or DATA-U/DATA-L if you choose that
+- [x] Band buttons: one click to each band's SSTV frequency, switching the radio to DATA-U (DATA-L on 80 and 40 m) from whatever mode it was in
 - [x] Locks onto a picture already under way (no start tones needed)
 - [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
       CAT with a watchdog; sent pictures are listed with the received ones
