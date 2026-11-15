@@ -132,23 +132,29 @@ func TestTuneToSSTVFrequencies(t *testing.T) {
 	}
 	for _, c := range []struct {
 		band, before, freq, mode string
+		data                     bool
 	}{
-		{"40m", "2", "007171000", "8"}, // from USB: DATA-L on 40
-		{"20m", "1", "014230000", "C"}, // from LSB: DATA-U on 20
-		{"80m", "C", "003845000", "8"}, // DATA-U to DATA-L
-		{"10m", "8", "028680000", "C"},
-		{"15m", "3", "021340000", "C"}, // from CW
-		{"6m", "4", "050680000", "C"},  // from FM
-		{"20m", "5", "014230000", "C"}, // from AM
-		{"40m", "9", "007171000", "8"}, // from RTTY
+		{"40m", "2", "007171000", "1", false}, // plain sideband (the default): LSB on 40
+		{"20m", "1", "014230000", "2", false}, // USB on 20
+		{"15m", "3", "021340000", "2", false}, // from CW
+		{"6m", "4", "050680000", "2", false},  // from FM
+		{"20m", "5", "014230000", "2", false}, // from AM
+		{"40m", "9", "007171000", "1", false}, // from RTTY
+		{"80m", "C", "003845000", "1", false}, // out of DATA-U too
+		{"40m", "2", "007171000", "8", true},  // DATA, when asked for: DATA-L on 40
+		{"20m", "1", "014230000", "C", true},  // DATA-U on 20
+		{"80m", "C", "003845000", "8", true},
+		{"10m", "8", "028680000", "C", true},
+		{"15m", "3", "021340000", "C", true},
+		{"40m", "9", "007171000", "8", true},
 	} {
 		radio.mode = c.before
 		r.poll(r.gen)
-		if err := r.tune(c.band); err != nil {
+		if err := r.tune(c.band, c.data); err != nil {
 			t.Fatalf("%s: %v", c.band, err)
 		}
 		if radio.freq != c.freq || radio.mode != c.mode {
-			t.Errorf("%s from mode %s: radio at %s mode %s, want %s mode %s", c.band, c.before, radio.freq, radio.mode, c.freq, c.mode)
+			t.Errorf("%s from mode %s (data %v): radio at %s mode %s, want %s mode %s", c.band, c.before, c.data, radio.freq, radio.mode, c.freq, c.mode)
 		}
 	}
 	if st := r.status(); st.FreqHz != 7171000 || st.Mode != "DATA-L" {
@@ -161,10 +167,10 @@ func TestTuneToSSTVFrequencies(t *testing.T) {
 	if err := r2.connect("port", 38400); err != nil {
 		t.Fatal(err)
 	}
-	if err := r2.tune("20m"); err == nil || !strings.Contains(err.Error(), "didn't switch") {
+	if err := r2.tune("20m", false); err == nil || !strings.Contains(err.Error(), "didn't switch") {
 		t.Errorf("stuck mode: %v", err)
 	}
-	if err := r.tune("17m"); err == nil {
+	if err := r.tune("17m", false); err == nil {
 		t.Error("tuned to a band with no SSTV frequency")
 	}
 }

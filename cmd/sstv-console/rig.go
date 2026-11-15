@@ -183,9 +183,11 @@ var sstvBands = []sstvBand{
 }
 
 // tune moves VFO A to a band's SSTV frequency and puts the radio in the mode SSTV needs,
-// whatever it was in (CW, FM, AM, voice SSB, RTTY...): DATA-U, or DATA-L on 80 and 40 m.
-// The DATA modes take their audio from the USB sound card instead of the microphone.
-func (r *rigConn) tune(band string) error {
+// whatever it was in (CW, FM, AM, RTTY...): upper sideband, or lower on 80 and 40 m.
+// data: use the radio's DATA-U / DATA-L rather than plain USB / LSB (DATA takes its audio
+// from the USB sound card by design; plain sideband does too with the radio's usual
+// "auto" audio source, which is how many people run it).
+func (r *rigConn) tune(band string, data bool) error {
 	var b *sstvBand
 	for i := range sstvBands {
 		if sstvBands[i].Name == band {
@@ -203,9 +205,14 @@ func (r *rigConn) tune(band string) error {
 		r.io.Unlock()
 		return fmt.Errorf("the radio isn't connected")
 	}
-	mode := ft710.DATAU
-	if b.Lower {
+	mode := ft710.USB
+	switch {
+	case data && b.Lower:
 		mode = ft710.DATAL
+	case data:
+		mode = ft710.DATAU
+	case b.Lower:
+		mode = ft710.LSB
 	}
 	fa, err := ft710.SetFreqA(b.FreqHz)
 	if err == nil {
