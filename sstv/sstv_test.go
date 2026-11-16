@@ -35,7 +35,6 @@ func run(t *testing.T, d *Decoder, audio []float32) (done *Event, started *Mode)
 	for i := 0; i < len(audio); i += 4096 { // in blocks, like live audio
 		j := min(i+4096, len(audio))
 		for _, e := range d.Write(audio[i:j]) {
-			e := e
 			switch e.Kind {
 			case Started:
 				started = e.Mode
@@ -58,7 +57,6 @@ func TestEveryModeRoundTrips(t *testing.T) {
 		if testing.Short() && m.Duration() > 80 {
 			continue
 		}
-		m := m
 		t.Run(m.Name, func(t *testing.T) {
 			t.Parallel()
 			card := TestCard(m.Width, m.Height)
@@ -186,7 +184,6 @@ func TestJoinsAPictureAlreadyUnderWay(t *testing.T) {
 			d := NewDecoder(48000)
 			for i := 0; i < len(audio); i += 4096 {
 				for _, e := range d.Write(audio[i:min(i+4096, len(audio))]) {
-					e := e
 					if e.Kind == Started && started == nil {
 						started = &e
 					}
@@ -249,7 +246,6 @@ func TestJoinsThroughNoise(t *testing.T) {
 	var done *Event
 	for i := 0; i < len(audio); i += 4096 {
 		for _, e := range d.Write(audio[i:min(i+4096, len(audio))]) {
-			e := e
 			if e.Kind == Done {
 				done = &e
 			}

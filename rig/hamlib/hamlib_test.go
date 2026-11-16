@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeRigctld answers like rigctld for a radio on 14.230 MHz in PKTUSB, and records the
@@ -104,5 +105,48 @@ func TestBadModeAndAddr(t *testing.T) {
 		if ValidAddr(a) != want {
 			t.Errorf("ValidAddr(%q) = %v", a, !want)
 		}
+	}
+}
+
+// An error reply (the radio is off) leaves the connection fine; a dropped link or a command
+// that timed out does not, because a late reply would be read as the answer to the next one.
+func TestBrokenOnlyWhenTheLinkIs(t *testing.T) {
+	addr, _ := fakeRigctld(t, map[string]string{"f": "RPRT -5\n"})
+	c, _ := Dial(addr)
+	defer c.Close()
+	if _, err := c.Freq(); err == nil || !strings.Contains(err.Error(), "communication error") {
+		t.Fatalf("freq: %v", err)
+	}
+	if c.Broken() {
+		t.Error("an error reply from the radio marked the connection broken")
+	}
+
+	// rigctld goes away
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	go func() { c, _ := ln.Accept(); c.Close() }()
+	d, err := Dial(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Freq(); err == nil || !d.Broken() {
+		t.Errorf("dropped link: err %v, broken %v", err, d.Broken())
+	}
+	ln.Close()
+
+	// rigctld stops answering
+	ln2, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln2.Close()
+	go func() {
+		c, _ := ln2.Accept()
+		bufio.NewReader(c).ReadString('\n') // takes the command, says nothing
+		time.Sleep(time.Second)
+		c.Close()
+	}()
+	e, _ := Dial(ln2.Addr().String())
+	e.Timeout = 60 * time.Millisecond
+	defer e.Close()
+	if _, err := e.Freq(); err == nil || !e.Broken() {
+		t.Errorf("timeout: err %v, broken %v", err, e.Broken())
 	}
 }

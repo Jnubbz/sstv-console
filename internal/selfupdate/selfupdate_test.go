@@ -48,12 +48,11 @@ func TestNewer(t *testing.T) {
 }
 
 type release struct {
-	pub        string
-	manifest   []byte
-	sig        string
-	zip        []byte
-	srv        *httptest.Server
-	manifestOK bool
+	pub      string
+	manifest []byte
+	sig      string
+	zip      []byte
+	srv      *httptest.Server
 }
 
 func makeZip(t *testing.T, files map[string]string) []byte {
@@ -185,7 +184,7 @@ func TestRefusesTampering(t *testing.T) {
 	if _, err := c.Download(context.Background(), a, dir, nil); err == nil || !strings.Contains(err.Error(), "doesn't match") {
 		t.Fatalf("swapped zip: %v", err)
 	}
-	r.zip = append(orig, 'x') // longer than signed
+	r.zip = append(append([]byte(nil), orig...), 'x') // longer than signed
 	if _, err := c.Download(context.Background(), a, dir, nil); err == nil {
 		t.Fatal("oversized zip accepted")
 	}

@@ -35,7 +35,7 @@ func main() {
 	if *afterUpdate > 0 {
 		waitForExit(*afterUpdate, 15*time.Second)
 	}
-	clearOldFiles()
+	tidyAfterUpdates()
 
 	ln, err := listen(*port, *afterUpdate > 0)
 	if err != nil {
@@ -52,8 +52,15 @@ func main() {
 	app := newApp(p, quit, dataDir(), picturesDir())
 	go app.reconnect()
 	updater.start(app)
+	srv := &http.Server{
+		Handler:           app.handler(),
+		ReadHeaderTimeout: 10 * time.Second, // nothing legitimate is slow: it's this machine
+		ReadTimeout:       2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
 	go func() {
-		if err := http.Serve(ln, app.handler()); err != nil {
+		if err := srv.Serve(ln); err != nil {
 			fmt.Fprintln(os.Stderr, "SSTV Console:", err)
 			quit()
 		}

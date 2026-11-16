@@ -215,6 +215,10 @@ func (a *App) handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"ports": serial.List(), "bauds": serial.Bauds})
 	})
 	mux.HandleFunc("POST /api/rig/connect", func(w http.ResponseWriter, r *http.Request) {
+		if a.tx.isKeyed() { // replacing the connection would let go of a keyed radio
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "transmitting: change the radio when the picture has gone out (Esc stops it)"})
+			return
+		}
 		var req struct {
 			Kind string `json:"kind"`
 			Port string `json:"port"`
@@ -287,6 +291,10 @@ func (a *App) handler() http.Handler {
 		writeJSON(w, http.StatusOK, a.status())
 	})
 	mux.HandleFunc("POST /api/rig/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		if a.tx.isKeyed() {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "transmitting: disconnect when the picture has gone out (Esc stops it)"})
+			return
+		}
 		a.rig.disconnect()
 		a.set.update(func(s *Settings) { s.RigPort, s.RigOn = "", false })
 		writeJSON(w, http.StatusOK, a.status())
@@ -535,8 +543,16 @@ func (a *App) guard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		// Browsers say where a request came from. Our own page is "same-origin"; typing the
+		// address or opening the window is "none". Anything from another site, even another
+		// port on this machine, is not our page.
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")

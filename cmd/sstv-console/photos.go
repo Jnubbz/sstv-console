@@ -40,7 +40,7 @@ func addPhoto(dir string, b []byte) (string, error) {
 	}
 	sum := sha256.Sum256(b)
 	id := hex.EncodeToString(sum[:8])
-	if err := os.MkdirAll(photosDir(dir), 0o755); err != nil {
+	if err := os.MkdirAll(photosDir(dir), 0o700); err != nil {
 		return "", err
 	}
 	if _, err := os.Stat(photoFile(dir, id, "")); err != nil {
@@ -60,7 +60,7 @@ func addPhoto(dir string, b []byte) (string, error) {
 
 func writeFileAtomic(path string, b []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

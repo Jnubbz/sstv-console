@@ -5,6 +5,7 @@ package main
 // MD0 questions). PTT for transmit is here too, for when sending arrives.
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -21,7 +22,7 @@ type rigStatus struct {
 	Port      string `json:"port,omitempty"`
 	Baud      int    `json:"baud,omitempty"`
 	Model     string `json:"model,omitempty"`
-	Kind      string `json:"kind,omitempty"`   // "yaesu" or "generic"
+	Kind      string `json:"kind,omitempty"`   // "yaesu", "generic" or "hamlib"
 	Manual    bool   `json:"manual,omitempty"` // no CAT: the frequency is the band last picked, not read from the radio
 	FreqHz    int    `json:"freqHz,omitempty"`
 	Mode      string `json:"mode,omitempty"`
@@ -42,6 +43,7 @@ type hamRadio interface {
 	SetFreq(hz int) error
 	SetMode(mode string) error
 	PTT(on bool) error
+	Broken() bool // the link dropped or fell out of step: dial again
 	Close()
 }
 
@@ -63,16 +65,19 @@ type rigOpts struct {
 }
 
 type rigConn struct {
-	io   sync.Mutex // one conversation with the radio at a time (never held with mu)
-	mu   sync.Mutex
-	port catPort
-	hl   hamRadio // kind "hamlib": the rigctld connection
-	kind string   // "yaesu", "generic" or "hamlib" while connected
-	line string   // generic: the line that keys it ("rts", "dtr" or "none")
-	st   rigStatus
-	gen  int // bumps on every connect/disconnect: stops the old poller
-	open func(path string, baud int) (catPort, error)
-	dial func(addr string) (hamRadio, error)
+	conn  sync.Mutex // connecting and disconnecting, one at a time; taken before io and mu
+	io    sync.Mutex // one conversation with the radio at a time (never held with mu)
+	mu    sync.Mutex
+	port  catPort
+	hl    hamRadio  // kind "hamlib": the rigctld connection
+	addr  string    // hamlib: where rigctld is, to dial it again
+	tried time.Time // hamlib: when it was last dialled again
+	kind  string    // "yaesu", "generic" or "hamlib" while connected
+	line  string    // generic: the line that keys it ("rts", "dtr" or "none")
+	st    rigStatus
+	gen   int // bumps on every connect/disconnect: stops the old poller
+	open  func(path string, baud int) (catPort, error)
+	dial  func(addr string) (hamRadio, error)
 }
 
 func newRig() *rigConn {
@@ -94,14 +99,16 @@ func (r *rigConn) connect(path string, baud int) error {
 }
 
 func (r *rigConn) connectWith(o rigOpts) error {
-	if o.Kind == "generic" {
+	r.conn.Lock() // two connects at once would each open a port, and one would never be closed
+	defer r.conn.Unlock()
+	switch o.Kind {
+	case "generic":
 		return r.connectGeneric(o)
-	}
-	if o.Kind == "hamlib" {
+	case "hamlib":
 		return r.connectHamlib(o)
 	}
 	path, baud := o.Port, o.Baud
-	r.disconnect()
+	r.drop()
 	fail := func(err error) error {
 		r.mu.Lock()
 		r.st = rigStatus{Port: path, Baud: baud, Error: err.Error()}
@@ -140,7 +147,7 @@ func (r *rigConn) connectWith(o rigOpts) error {
 // connectGeneric "connects" a radio with no CAT: it opens the serial port that keys it
 // (RTS or DTR, both held low until a transmission), or none at all for VOX.
 func (r *rigConn) connectGeneric(o rigOpts) error {
-	r.disconnect()
+	r.drop()
 	if o.PTT != "rts" && o.PTT != "dtr" {
 		o.PTT = "none"
 	}
@@ -173,7 +180,7 @@ func (r *rigConn) connectGeneric(o rigOpts) error {
 
 // connectHamlib connects to a running rigctld, which does the talking to the radio.
 func (r *rigConn) connectHamlib(o rigOpts) error {
-	r.disconnect()
+	r.drop()
 	addr := o.Addr
 	if addr == "" {
 		addr = hamlib.DefaultAddr
@@ -196,7 +203,7 @@ func (r *rigConn) connectHamlib(o rigOpts) error {
 		return fail(fmt.Errorf("rigctld is running but the radio didn't answer: %v", err))
 	}
 	r.mu.Lock()
-	r.hl, r.kind, r.line = h, "hamlib", ""
+	r.hl, r.addr, r.tried, r.kind, r.line = h, addr, time.Time{}, "hamlib", ""
 	r.gen++
 	gen := r.gen
 	r.st = rigStatus{Connected: true, Port: addr, Model: "Radio via Hamlib (" + addr + ")", Kind: "hamlib"}
@@ -213,32 +220,74 @@ func (r *rigConn) connectHamlib(o rigOpts) error {
 	return nil
 }
 
+// ham returns the rigctld connection, dialling it again first if it broke (rigctld was
+// restarted, or a reply came too late and the conversation is out of step). Call with r.io
+// held. A new dial is tried at most every 3 seconds, unless force is set (keying the radio
+// can't wait).
+func (r *rigConn) ham(force bool) (hamRadio, error) {
+	r.mu.Lock()
+	h, addr, tried := r.hl, r.addr, r.tried
+	r.mu.Unlock()
+	if h == nil {
+		return nil, errors.New("the radio isn't connected")
+	}
+	if !h.Broken() {
+		return h, nil
+	}
+	lost := fmt.Errorf("lost rigctld at %s: start it again and SSTV Console reconnects by itself", addr)
+	if !force && time.Since(tried) < 3*time.Second {
+		return nil, lost
+	}
+	n, err := r.dial(addr)
+	r.mu.Lock()
+	r.tried = time.Now()
+	if err != nil || r.hl != h {
+		r.mu.Unlock()
+		if err == nil {
+			n.Close()
+		}
+		return nil, lost
+	}
+	r.hl = n
+	r.mu.Unlock()
+	h.Close()
+	return n, nil
+}
+
 // pollHamlib is poll for a rigctld connection.
 func (r *rigConn) pollHamlib(gen int) bool {
 	r.io.Lock()
 	defer r.io.Unlock()
 	r.mu.Lock()
-	h := r.hl
-	if r.gen != gen || h == nil {
+	if r.gen != gen || r.hl == nil {
 		r.mu.Unlock()
 		return false
 	}
 	r.mu.Unlock()
-	hz, err1 := h.Freq()
-	md, err2 := h.Mode()
+	var hz int
+	var md string
+	var err1, err2 error
+	h, err := r.ham(false)
+	if err == nil {
+		hz, err1 = h.Freq()
+		md, err2 = h.Mode()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.gen != gen {
 		return false
 	}
-	if err1 != nil || err2 != nil {
+	switch {
+	case err != nil:
+		r.st.Error = err.Error()
+	case err1 != nil || err2 != nil:
 		r.st.Error = "The radio stopped answering (is it on, and is rigctld still running?)"
-		r.st.FreqHz, r.st.Mode = 0, ""
+	default:
+		r.st.Error, r.st.FreqHz, r.st.Mode = "", hz, hamlib.DisplayMode(md)
 		return true
 	}
-	r.st.Error = ""
-	r.st.FreqHz, r.st.Mode = hz, hamlib.DisplayMode(md)
-	return true
+	r.st.FreqHz, r.st.Mode = 0, ""
+	return true // keep trying: it comes back when rigctld and the radio do
 }
 
 // poll asks frequency and mode. false: this connection is over.
@@ -290,6 +339,13 @@ func parseFA(s string) (int, bool) {
 }
 
 func (r *rigConn) disconnect() {
+	r.conn.Lock()
+	defer r.conn.Unlock()
+	r.drop()
+}
+
+// drop closes whatever is connected. The caller holds r.conn.
+func (r *rigConn) drop() {
 	r.mu.Lock()
 	r.gen++ // the poller stops at its next look
 	r.mu.Unlock()
@@ -314,13 +370,14 @@ func (r *rigConn) ptt(on bool) error {
 	r.io.Lock()
 	defer r.io.Unlock()
 	r.mu.Lock()
-	p, kind, line, hl := r.port, r.kind, r.line, r.hl
+	p, kind, line := r.port, r.kind, r.line
 	r.mu.Unlock()
 	if kind == "hamlib" {
-		if hl == nil {
-			return fmt.Errorf("the radio isn't connected")
+		h, err := r.ham(true)
+		if err != nil {
+			return err
 		}
-		return hl.PTT(on)
+		return h.PTT(on)
 	}
 	if kind == "generic" {
 		ls, ok := p.(lineSetter)
@@ -389,6 +446,12 @@ func (r *rigConn) tune(band string) error {
 	}
 	var want string
 	var err error
+	if hl != nil {
+		if hl, err = r.ham(true); err != nil {
+			r.io.Unlock()
+			return err
+		}
+	}
 	if hl != nil { // rigctld: Hamlib's PKTUSB / PKTLSB are the data modes
 		mode := hamlib.DataUSB
 		if b.Lower {

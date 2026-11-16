@@ -28,6 +28,18 @@ type Client struct {
 	c       net.Conn
 	r       *bufio.Reader
 	Timeout time.Duration // per command; a radio can be slow to answer
+	broken  bool
+}
+
+// Broken says the connection can't be trusted any more: the link dropped, or a command
+// timed out so its late reply could be mistaken for the answer to the next one. The
+// caller Dials again. (A radio that answers with an error is not broken: rigctld is fine.)
+func (c *Client) Broken() bool { return c.broken }
+
+// fail marks the connection broken and passes err on.
+func (c *Client) fail(err error) error {
+	c.broken = true
+	return err
 }
 
 // Dial connects to rigctld at host:port.
@@ -80,13 +92,13 @@ func explain(n int) string {
 func (c *Client) lines(cmd string, want int) ([]string, error) {
 	c.c.SetDeadline(time.Now().Add(c.Timeout))
 	if _, err := fmt.Fprintf(c.c, "%s\n", cmd); err != nil {
-		return nil, err
+		return nil, c.fail(err)
 	}
 	var out []string
 	for len(out) < want {
 		l, err := c.r.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return nil, c.fail(err)
 		}
 		l = strings.TrimRight(l, "\r\n")
 		if rp, e := errCode(l); rp {
@@ -108,7 +120,7 @@ func (c *Client) Freq() (int, error) {
 	}
 	hz, err := strconv.ParseFloat(strings.TrimSpace(l[0]), 64)
 	if err != nil || hz <= 0 {
-		return 0, fmt.Errorf("rigctld sent %q for the frequency", l[0])
+		return 0, c.fail(fmt.Errorf("rigctld sent %q for the frequency", l[0]))
 	}
 	return int(hz + 0.5), nil
 }
@@ -126,17 +138,17 @@ func (c *Client) Mode() (string, error) {
 func (c *Client) set(cmd string) error {
 	c.c.SetDeadline(time.Now().Add(c.Timeout))
 	if _, err := fmt.Fprintf(c.c, "%s\n", cmd); err != nil {
-		return err
+		return c.fail(err)
 	}
 	l, err := c.r.ReadString('\n')
 	if err != nil {
-		return err
+		return c.fail(err)
 	}
 	l = strings.TrimRight(l, "\r\n")
 	if rp, e := errCode(l); rp {
 		return e
 	}
-	return fmt.Errorf("rigctld sent %q, expected RPRT", l)
+	return c.fail(fmt.Errorf("rigctld sent %q, expected RPRT", l))
 }
 
 // SetFreq moves the radio to hz.

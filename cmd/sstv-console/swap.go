@@ -6,9 +6,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Jnubbz/sstv-console/internal/selfupdate"
 )
@@ -112,8 +116,9 @@ func exeDir() (string, error) {
 }
 
 // swapFiles unpacks zip in stage and copies its files over dir. Windows lets a running
-// .exe be renamed but not overwritten, so each existing file is renamed to *.old first
-// (cleared by the next start, clearOldFiles). If anything fails, every file is put back.
+// .exe be renamed but not overwritten, so each existing file is renamed to *.old first.
+// The names of those files are written to oldList, and the next start (tidyAfterUpdates)
+// removes exactly them. If anything fails, every file is put back.
 func swapFiles(dir, zip, stage string) error {
 	x := filepath.Join(stage, "x")
 	if err := os.Mkdir(x, 0o755); err != nil {
@@ -164,19 +169,77 @@ func swapFiles(dir, zip, stage string) error {
 		undo()
 		return err
 	}
+	var names []string
+	for _, m := range done {
+		if rel, err := filepath.Rel(dir, m.old); err == nil {
+			names = append(names, rel)
+		}
+	}
+	// If this can't be written the .old files just stay (the exe's is always cleared by name).
+	_ = os.WriteFile(filepath.Join(dir, oldList), []byte(strings.Join(names, "\n")+"\n"), 0o644)
 	return nil
 }
 
-// clearOldFiles removes the *.old files a Windows update left next to the app.
-func clearOldFiles() {
+// oldList is the file in the app's folder that names the *.old files the last update left.
+const oldList = ".sstv-update-leftovers"
+
+// tidyAfterUpdates runs at every start: it clears what an earlier update left behind.
+func tidyAfterUpdates() {
 	dir, err := exeDir()
 	if err != nil {
 		return
 	}
-	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && strings.HasSuffix(p, ".old") {
-			os.Remove(p)
+	parent := dir // where an update's download folder is made: next to the app
+	if app := appBundle(); app != "" {
+		parent = filepath.Dir(app)
+	}
+	if runtime.GOOS == "windows" {
+		clearOldIn(dir)
+	}
+	clearStaleStages(parent, time.Hour)
+}
+
+// clearOldIn removes the old files the last update listed in dir, and the old program. It
+// never removes anything else, whatever it's called: the list's names must end in .old and
+// stay inside dir.
+func clearOldIn(dir string) {
+	list := filepath.Join(dir, oldList)
+	var names []string
+	if b, err := os.ReadFile(list); err == nil {
+		names = strings.Split(string(b), "\n")
+	}
+	names = append(names, winExe+".old")
+	stuck := false
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" || !strings.HasSuffix(n, ".old") || !filepath.IsLocal(n) {
+			continue
 		}
-		return nil
-	})
+		if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			stuck = true // still in use: look again at the next start
+		}
+	}
+	if !stuck {
+		os.Remove(list)
+	}
+}
+
+// updateFolder is how an update's working folder is named (os.MkdirTemp(dir, ".sstv-update-")).
+var updateFolder = regexp.MustCompile(`^\.sstv-update-[0-9]+$`)
+
+// clearStaleStages removes update working folders in dir that an interrupted update left
+// behind, once they are older than age (so one in use right now is never touched).
+func clearStaleStages(dir string, age time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !updateFolder.MatchString(e.Name()) {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > age {
+			os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
 }

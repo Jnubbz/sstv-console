@@ -48,6 +48,9 @@ type transmitter struct {
 	timer   *time.Timer
 	err     string
 
+	retrying   bool          // a background retry of PTT-off is running
+	retryEvery time.Duration // how often it tries (2 seconds when zero)
+
 	rig    *rigConn
 	onEnd  func()                                    // receiving starts afresh
 	onSent func(png []byte, m *sstv.Mode, to string) // the picture went out
@@ -210,7 +213,8 @@ func (t *transmitter) unkey(id int, stopped bool) {
 			time.Sleep(150 * time.Millisecond)
 		}
 		if err != nil {
-			t.err = "COULDN'T UNKEY THE RADIO over CAT: check it and press its PTT or power button"
+			t.err = unkeyFailed
+			t.keepUnkeying()
 		}
 	}
 	whole := !stopped && time.Since(t.since).Seconds() > t.seconds-1
@@ -225,6 +229,42 @@ func (t *transmitter) unkey(id int, stopped bool) {
 	}
 }
 
+const unkeyFailed = "COULDN'T UNKEY THE RADIO: press its PTT button or turn it off. SSTV Console keeps trying."
+
+// keepUnkeying: the radio wouldn't unkey (the port is gone, or rigctld is down). Try again
+// every couple of seconds until it does, a new transmission starts (that keys it on
+// purpose), or the radio is disconnected. Call with t.mu held.
+func (t *transmitter) keepUnkeying() {
+	if t.retrying {
+		return
+	}
+	t.retrying = true
+	every := t.retryEvery
+	if every == 0 {
+		every = 2 * time.Second
+	}
+	go func() {
+		for {
+			time.Sleep(every)
+			t.mu.Lock()
+			if t.keyed || !t.rig.status().Connected {
+				t.retrying = false
+				t.mu.Unlock()
+				return
+			}
+			if t.rig.ptt(false) == nil {
+				t.retrying = false
+				if t.err == unkeyFailed {
+					t.err = ""
+				}
+				t.mu.Unlock()
+				return
+			}
+			t.mu.Unlock()
+		}
+	}()
+}
+
 // My picture: the photo replies are built on, kept between runs.
 func photoPath(dir string) string { return filepath.Join(dir, "my-picture") }
 
@@ -233,7 +273,7 @@ func savePhoto(dir string, b []byte) error {
 		return errors.New("that isn't a JPEG or PNG picture")
 	}
 	tmp := photoPath(dir) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, photoPath(dir))

@@ -53,11 +53,11 @@ func setupInstaller(u *desktopUpdater, a *App) {
 
 const synchronize = 0x00100000
 
-func waitForExit(pid int, max time.Duration) {
+func waitForExit(pid int, limit time.Duration) {
 	h, err := syscall.OpenProcess(synchronize, false, uint32(pid))
 	if err != nil {
 		return // already gone
 	}
 	defer syscall.CloseHandle(h)
-	syscall.WaitForSingleObject(h, uint32(max/time.Millisecond))
+	syscall.WaitForSingleObject(h, uint32(limit/time.Millisecond))
 }

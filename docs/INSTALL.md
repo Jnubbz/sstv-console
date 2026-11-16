@@ -85,8 +85,8 @@ Unsigned programs sometimes get flagged by mistake; the code is open for you to 
 - The app runs a small local web page and shows it in its own window. Nothing is reachable
   from other computers.
 - It checks GitHub for updates a few seconds after starting and every 6 hours. About →
-  *Check for updates* does it right away. Updates are installed only after their signature
-  and checksum pass.
+  *Check for updates* does it right away. A new version is installed only when you press
+  *Install and restart*, and only after its signature and checksum pass.
 - Something not working? About → **Report a bug** opens a prefilled GitHub issue.
 
 ## When this goes away

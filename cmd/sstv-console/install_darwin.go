@@ -45,8 +45,8 @@ func setupInstaller(u *desktopUpdater, a *App) {
 	}
 }
 
-func waitForExit(pid int, max time.Duration) {
-	deadline := time.Now().Add(max)
+func waitForExit(pid int, limit time.Duration) {
+	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) && syscall.Kill(pid, 0) == nil {
 		time.Sleep(100 * time.Millisecond)
 	}

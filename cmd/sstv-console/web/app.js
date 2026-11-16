@@ -5,8 +5,8 @@
 
 const $ = (id) => document.getElementById(id);
 
-async function api(path, method = "GET", body) {
-  const opt = { method, headers: method === "GET" ? {} : { "X-SSTV-Console": "1" } };
+async function api(path, method = "GET", body, signal) {
+  const opt = { method, signal, headers: method === "GET" ? {} : { "X-SSTV-Console": "1" } };
   if (body instanceof ArrayBuffer) opt.body = body;
   else if (body !== undefined) opt.body = JSON.stringify(body);
   const r = await fetch(path, opt);
@@ -71,8 +71,16 @@ function render(s) {
   if (u.state === "restarting") waitForNewVersion();
 }
 
+// One status request at a time, each given up on after 5 seconds: a stuck engine must not
+// pile up requests that all land when it wakes.
+let polling = false;
 async function poll() {
-  try { render(await api("/api/status")); } catch { /* engine restarting */ }
+  if (polling) return;
+  polling = true;
+  const stop = new AbortController(), timer = setTimeout(() => stop.abort(), 5000);
+  try { render(await api("/api/status", "GET", undefined, stop.signal)); } catch { /* engine restarting */ }
+  clearTimeout(timer);
+  polling = false;
 }
 
 // After "restarting", the engine goes away and the new one comes back on the same address.

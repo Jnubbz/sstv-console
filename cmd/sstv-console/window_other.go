@@ -18,5 +18,3 @@ func showWindow(url string, keep int) bool {
 	}
 	return false // no window to watch: the page's Quit button stops the app
 }
-
-func windowPID() int { return 0 }

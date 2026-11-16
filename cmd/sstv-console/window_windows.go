@@ -44,8 +44,12 @@ func showWindow(url string, keep int) bool {
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		return false // the page's Quit button stops the app
 	}
-	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "SSTV Console", "window")
-	os.MkdirAll(profile, 0o755)
+	base, err := os.UserCacheDir() // %LocalAppData%: the window's browser profile is big and per machine
+	if err != nil {
+		base = os.TempDir()
+	}
+	profile := filepath.Join(base, "SSTV Console", "window")
+	os.MkdirAll(profile, 0o700)
 	cmd := exec.Command(edge, "--app="+url, "--user-data-dir="+profile,
 		"--window-size=1440,900", "--autoplay-policy=no-user-gesture-required", "--no-first-run", "--no-default-browser-check")
 	if err := cmd.Start(); err != nil {

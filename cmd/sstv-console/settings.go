@@ -43,7 +43,8 @@ func dataDir() string {
 		base = os.TempDir()
 	}
 	d := filepath.Join(base, "SSTV Console")
-	os.MkdirAll(d, 0o755)
+	os.MkdirAll(d, 0o700) // settings and unsaved pictures are for this user only
+	os.Chmod(d, 0o700)
 	return d
 }
 
@@ -85,7 +86,7 @@ func (st *settingsStore) update(f func(*Settings)) {
 	f(&st.s)
 	b, _ := json.MarshalIndent(st.s, "", "  ")
 	tmp := st.path + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
+	if os.WriteFile(tmp, b, 0o600) == nil {
 		os.Rename(tmp, st.path)
 	}
 }

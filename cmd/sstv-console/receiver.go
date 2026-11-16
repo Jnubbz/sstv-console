@@ -56,14 +56,6 @@ type rxStatus struct {
 	Recorded  string  `json:"recorded,omitempty"`  // the last test recording's file
 }
 
-var dumpAudio = func() *os.File {
-	if p := os.Getenv("SSTV_DUMP_AUDIO"); p != "" {
-		f, _ := os.Create(p)
-		return f
-	}
-	return nil
-}()
-
 type receiver struct {
 	mu        sync.Mutex
 	dec       *sstv.Decoder
@@ -88,12 +80,18 @@ const unsavedKeep = 7 * 24 * time.Hour
 
 func newReceiver(dir, picDir string, freq func() int) *receiver {
 	r := &receiver{picDir: picDir, inboxDir: filepath.Join(dir, "inbox"), indexPath: filepath.Join(dir, "received.json"), freq: freq, now: time.Now}
-	os.MkdirAll(r.inboxDir, 0o755)
+	os.MkdirAll(r.inboxDir, 0o700)
 	if b, err := os.ReadFile(r.indexPath); err == nil {
-		json.Unmarshal(b, &r.pics)
+		if err := json.Unmarshal(b, &r.pics); err != nil {
+			os.Rename(r.indexPath, r.indexPath+".bad") // keep it: the next save would overwrite it
+			r.pics = nil
+		}
 	}
 	kept := r.pics[:0]
 	for _, p := range r.pics {
+		if !validID(p.ID) {
+			continue // not a name this app makes: never turn it into a path
+		}
 		if _, err := os.Stat(filepath.Join(r.inboxDir, p.ID+".png")); err == nil {
 			kept = append(kept, p) // waiting in the inbox
 		} else if _, err := os.Stat(filepath.Join(r.picDir, p.ID+".png")); err == nil {
@@ -104,6 +102,20 @@ func newReceiver(dir, picDir string, freq func() int) *receiver {
 	r.pics = kept
 	r.expire()
 	return r
+}
+
+// validID: a picture's id is its file name without ".png", so it can't hold a folder
+// separator or other characters a file name can't have.
+func validID(id string) bool {
+	if id == "" || len(id) > 200 {
+		return false
+	}
+	for _, c := range id {
+		if c < 0x20 || strings.ContainsRune(`/\:*?"<>|`, c) {
+			return false
+		}
+	}
+	return true
 }
 
 // file: where a picture is now (the inbox, or the Pictures folder once saved).
@@ -262,9 +274,6 @@ func (r *receiver) push(samples []float32, rate int) {
 	if r.muted != nil && r.muted() {
 		return
 	}
-	if dumpAudio != nil { // SSTV_DUMP_AUDIO=file: raw float32 of exactly what arrived, for debugging
-		binary.Write(dumpAudio, binary.LittleEndian, samples)
-	}
 	peak := 0.0
 	for _, s := range samples {
 		if a := math.Abs(float64(s)); a > peak {
@@ -346,7 +355,7 @@ func (r *receiver) addSent(pic []byte, m *sstv.Mode, to string) {
 	if hz > 0 {
 		id += fmt.Sprintf(" %d kHz", hz/1000)
 	}
-	if err := os.WriteFile(filepath.Join(r.inboxDir, id+".png"), pic, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(r.inboxDir, id+".png"), pic, 0o600); err != nil {
 		r.st.Note = "Couldn't save the sent picture: " + err.Error()
 		return
 	}
@@ -360,7 +369,7 @@ func (r *receiver) addSent(pic []byte, m *sstv.Mode, to string) {
 func (r *receiver) writeIndex() {
 	b, _ := json.MarshalIndent(r.pics, "", " ")
 	tmp := r.indexPath + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
+	if os.WriteFile(tmp, b, 0o600) == nil {
 		os.Rename(tmp, r.indexPath)
 	}
 }
@@ -379,7 +388,7 @@ func (r *receiver) save(e sstv.Event) {
 		}
 		return c
 	}, id)
-	f, err := os.Create(filepath.Join(r.inboxDir, id+".png"))
+	f, err := os.OpenFile(filepath.Join(r.inboxDir, id+".png"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		r.st.Note = "Couldn't save the picture: " + err.Error()
 		return

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"image/png"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -167,5 +169,109 @@ func TestTuneKeysACarrierAndSendsNoPicture(t *testing.T) {
 	}
 	if n := len(a.rx.pictures()); n != 0 {
 		t.Fatalf("a tuning carrier was filed as a picture (%d)", n)
+	}
+}
+
+// A radio whose PTT-off fails until it is let through: a port that went away for a moment.
+type stickyRadio struct {
+	mu    sync.Mutex
+	fail  bool
+	keyed bool
+}
+
+func (f *stickyRadio) Ask(cmd string) (string, error) {
+	switch cmd {
+	case "ID;":
+		return "ID0800;", nil
+	case "FA;":
+		return "FA014230000;", nil
+	case "MD0;":
+		return "MD0C;", nil
+	}
+	return "", errors.New("no answer")
+}
+func (f *stickyRadio) Write(cmd string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch cmd {
+	case "TX1;":
+		f.keyed = true
+	case "TX0;":
+		if f.fail {
+			return errors.New("port gone")
+		}
+		f.keyed = false
+	}
+	return nil
+}
+func (f *stickyRadio) Close()        {}
+func (f *stickyRadio) set(fail bool) { f.mu.Lock(); f.fail = fail; f.mu.Unlock() }
+func (f *stickyRadio) isKeyed() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.keyed }
+
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("gave up waiting for %s", what)
+}
+
+// If the radio won't unkey, say so and keep trying until it does: a stuck transmitter is the
+// worst thing this app can do.
+func TestAStuckTransmitterIsUnkeyedAsSoonAsThePortComesBack(t *testing.T) {
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
+	radio := &stickyRadio{}
+	a.rig.open = func(string, int) (catPort, error) { return radio, nil }
+	if err := a.rig.connect("port", 38400); err != nil {
+		t.Fatal(err)
+	}
+	defer a.rig.disconnect()
+	a.tx.retryEvery = 10 * time.Millisecond
+	id, _, _ := a.tx.prepare(cardPNG(t), "Martin 2", "")
+	if err := a.tx.key(id); err != nil {
+		t.Fatal(err)
+	}
+	radio.set(true)
+	a.tx.unkey(0, true)
+	if st := a.tx.status(); st.Keyed || !strings.Contains(st.Error, "COULDN'T UNKEY") {
+		t.Fatalf("status after the failed unkey: %+v", st)
+	}
+	if !radio.isKeyed() {
+		t.Fatal("test set-up: the radio should still be keyed")
+	}
+	radio.set(false) // the port is back
+	waitFor(t, "the radio to be unkeyed", func() bool { return !radio.isKeyed() })
+	waitFor(t, "the warning to clear", func() bool { return a.tx.status().Error == "" })
+}
+
+// ...but never cuts off a transmission started on purpose in the meantime.
+func TestTheUnkeyRetryLeavesANewTransmissionAlone(t *testing.T) {
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
+	radio := &stickyRadio{}
+	a.rig.open = func(string, int) (catPort, error) { return radio, nil }
+	if err := a.rig.connect("port", 38400); err != nil {
+		t.Fatal(err)
+	}
+	defer a.rig.disconnect()
+	a.tx.retryEvery = 5 * time.Millisecond
+	id, _, _ := a.tx.prepare(cardPNG(t), "Martin 2", "")
+	a.tx.key(id)
+	radio.set(true)
+	a.tx.unkey(0, true) // fails: the retry starts
+	radio.set(false)
+	id, _, _ = a.tx.prepare(cardPNG(t), "Martin 2", "")
+	if err := a.tx.key(id); err != nil { // the operator sends again at once
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // many retry ticks
+	if !radio.isKeyed() || !a.tx.isKeyed() {
+		t.Fatal("the retry cut off a transmission that was started on purpose")
+	}
+	a.tx.unkey(0, true)
+	if radio.isKeyed() {
+		t.Fatal("not unkeyed at the end")
 	}
 }

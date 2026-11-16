@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -120,6 +121,7 @@ func (u *desktopUpdater) startInstall() error {
 			u.mu.Unlock()
 		})
 		if err != nil {
+			os.RemoveAll(stage) // a half-downloaded zip is no use to anyone
 			fail(err)
 			return
 		}

@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         }
     }
 
-    // The engine prints "SSTV Console ... running at http://localhost:7373/".
+    // The engine prints "SSTV Console ... running at http://localhost:7380/".
     func engineSaid(_ s: String) {
         engineOut += s
         guard pageURL == nil,
@@ -131,7 +131,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
         decisionHandler: @escaping (WKPermissionDecision) -> Void
     ) {
-        decisionHandler(origin.host == pageURL?.host ? .grant : .deny)
+        let ours = origin.host == pageURL?.host && origin.port == (pageURL?.port ?? 0)
+        decisionHandler(ours ? .grant : .deny)
     }
 
     func webView(
@@ -207,7 +208,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for action: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if let url = action.request.url { NSWorkspace.shared.open(url) }
+        // only web links leave the app: never a file or some other program's address
+        if let url = action.request.url, url.scheme == "http" || url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+        }
         return nil
     }
 
@@ -232,11 +236,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         suggestedFilename: String, completionHandler: @escaping (URL?) -> Void
     ) {
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        var url = dir.appendingPathComponent(suggestedFilename)
+        // a bare file name: whatever the page suggested, it can't point out of Downloads
+        var name = (suggestedFilename as NSString).lastPathComponent
+        if name.isEmpty || name == "." || name == ".." { name = "SSTV Console download" }
+        var url = dir.appendingPathComponent(name)
         var n = 1
         while FileManager.default.fileExists(atPath: url.path) {
-            let base = (suggestedFilename as NSString).deletingPathExtension
-            let ext = (suggestedFilename as NSString).pathExtension
+            let base = (name as NSString).deletingPathExtension
+            let ext = (name as NSString).pathExtension
             url = dir.appendingPathComponent("\(base) (\(n))" + (ext.isEmpty ? "" : ".\(ext)"))
             n += 1
         }

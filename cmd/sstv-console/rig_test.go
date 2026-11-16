@@ -420,21 +420,58 @@ type fakeHam struct {
 	keyed  bool
 	closed bool
 	stuck  bool // ignores mode changes, like a radio that can't do DATA
+	dead   bool // the link to rigctld dropped: every call fails and Broken says so
 }
 
-func (f *fakeHam) Freq() (int, error)    { f.mu.Lock(); defer f.mu.Unlock(); return f.hz, nil }
-func (f *fakeHam) Mode() (string, error) { f.mu.Lock(); defer f.mu.Unlock(); return f.mode, nil }
-func (f *fakeHam) SetFreq(hz int) error  { f.mu.Lock(); defer f.mu.Unlock(); f.hz = hz; return nil }
+var errLinkDown = errors.New("connection reset")
+
+func (f *fakeHam) Freq() (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dead {
+		return 0, errLinkDown
+	}
+	return f.hz, nil
+}
+func (f *fakeHam) Mode() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dead {
+		return "", errLinkDown
+	}
+	return f.mode, nil
+}
+func (f *fakeHam) SetFreq(hz int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dead {
+		return errLinkDown
+	}
+	f.hz = hz
+	return nil
+}
 func (f *fakeHam) SetMode(m string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dead {
+		return errLinkDown
+	}
 	if !f.stuck {
 		f.mode = m
 	}
 	return nil
 }
-func (f *fakeHam) PTT(on bool) error { f.mu.Lock(); defer f.mu.Unlock(); f.keyed = on; return nil }
-func (f *fakeHam) Close()            { f.mu.Lock(); defer f.mu.Unlock(); f.closed = true }
+func (f *fakeHam) PTT(on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dead {
+		return errLinkDown
+	}
+	f.keyed = on
+	return nil
+}
+func (f *fakeHam) Broken() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.dead }
+func (f *fakeHam) Close()       { f.mu.Lock(); defer f.mu.Unlock(); f.closed = true }
 
 func TestHamlibRadioReadsTunesAndKeys(t *testing.T) {
 	h := &fakeHam{hz: 7074000, mode: "CW"}
@@ -490,5 +527,127 @@ func TestHamlibConnectProblemsAreClear(t *testing.T) {
 	}
 	if err := r.connectWith(rigOpts{Kind: "hamlib", Addr: "http://evil/x"}); err == nil || !strings.Contains(err.Error(), "isn't an address") {
 		t.Errorf("bad address: %v", err)
+	}
+}
+
+// rigctld restarts (or the link drops): the app dials it again by itself, and keying the radio
+// off never waits for the next poll to do it.
+func TestHamlibDialsAgainWhenRigctldRestarts(t *testing.T) {
+	first := &fakeHam{hz: 14230000, mode: "PKTUSB"}
+	second := &fakeHam{hz: 14230000, mode: "PKTUSB"}
+	var mu sync.Mutex
+	dials, refuse := 0, false
+	r := &rigConn{dial: func(string) (hamRadio, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		dials++
+		if refuse {
+			return nil, errors.New("connection refused")
+		}
+		if dials == 1 {
+			return first, nil
+		}
+		return second, nil
+	}}
+	if err := r.connectWith(rigOpts{Kind: "hamlib"}); err != nil {
+		t.Fatal(err)
+	}
+	defer r.disconnect()
+
+	// rigctld goes away and isn't back yet: the status says so, and it keeps trying
+	first.mu.Lock()
+	first.dead = true
+	first.mu.Unlock()
+	mu.Lock()
+	refuse = true
+	mu.Unlock()
+	r.poll(r.gen)
+	if st := r.status(); !strings.Contains(st.Error, "lost rigctld") || st.FreqHz != 0 {
+		t.Fatalf("status while rigctld is down: %+v", st)
+	}
+	r.poll(r.gen) // inside the 3 seconds: no new dial
+	mu.Lock()
+	n := dials
+	mu.Unlock()
+	if n != 2 {
+		t.Errorf("dialled %d times, want 2 (the first connect and one try)", n)
+	}
+
+	// rigctld is back: the next try (after the pause) reconnects and the radio shows again
+	mu.Lock()
+	refuse = false
+	mu.Unlock()
+	r.mu.Lock()
+	r.tried = time.Now().Add(-time.Minute)
+	r.mu.Unlock()
+	r.poll(r.gen)
+	if st := r.status(); st.Error != "" || st.FreqHz != 14230000 || st.Mode != "DATA-U" {
+		t.Fatalf("status after rigctld came back: %+v", st)
+	}
+	if !first.closed {
+		t.Error("the broken connection wasn't closed")
+	}
+}
+
+func TestKeyingOffDialsAgainAtOnce(t *testing.T) {
+	first := &fakeHam{hz: 14230000, mode: "PKTUSB"}
+	second := &fakeHam{hz: 14230000, mode: "PKTUSB", keyed: true} // the radio is still transmitting
+	dials := 0
+	r := &rigConn{dial: func(string) (hamRadio, error) {
+		dials++
+		if dials == 1 {
+			return first, nil
+		}
+		return second, nil
+	}}
+	if err := r.connectWith(rigOpts{Kind: "hamlib"}); err != nil {
+		t.Fatal(err)
+	}
+	defer r.disconnect()
+	first.mu.Lock()
+	first.dead = true
+	first.mu.Unlock()
+	r.mu.Lock()
+	r.tried = time.Now() // a poll just tried: keying off must not wait out the pause
+	r.mu.Unlock()
+	if err := r.ptt(false); err != nil {
+		t.Fatalf("ptt off: %v", err)
+	}
+	if second.keyed {
+		t.Error("the radio is still keyed")
+	}
+}
+
+// Two connects at once must not leave a connection open that nothing will ever close.
+func TestConnectsOneAtATime(t *testing.T) {
+	var mu sync.Mutex
+	var made []*fakeHam
+	r := &rigConn{dial: func(string) (hamRadio, error) {
+		time.Sleep(20 * time.Millisecond) // a slow dial: the other connect gets in
+		h := &fakeHam{hz: 14230000, mode: "PKTUSB"}
+		mu.Lock()
+		made = append(made, h)
+		mu.Unlock()
+		return h, nil
+	}}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.connectWith(rigOpts{Kind: "hamlib"})
+		}()
+	}
+	wg.Wait()
+	r.disconnect()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(made) != 4 {
+		t.Fatalf("%d connections made", len(made))
+	}
+	for i, h := range made {
+		if !h.closed {
+			t.Errorf("connection %d was left open", i)
+		}
 	}
 }

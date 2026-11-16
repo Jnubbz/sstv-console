@@ -1,8 +1,9 @@
 # SSTV Console
 
-Slow-scan TV that works like a messaging app. Pictures you receive are filed under the
-station that sent them, and replying takes one click: their callsign, RST and name go onto
-your picture automatically. For Windows and Mac, free software under the AGPL-3.0.
+Slow-scan TV that works like a messaging app. Pictures you receive land in an inbox, and
+replying takes one click: type the sender's callsign on their picture, press Reply, and your
+answer opens with their callsign and a signal report already on it. For Windows and Mac,
+free software under the AGPL-3.0.
 
 By KN0BLE. A sister project to [CW Console](https://github.com/Jnubbz/cw-console), built the
 same way so the two can merge into one app later.
@@ -47,8 +48,9 @@ Early days. In place now:
 - [x] Tune button: a 10-second steady carrier for the antenna tuner
 - [x] Band buttons: one click to each band's SSTV frequency, switching the radio to DATA-U (DATA-L on 80 and 40 m) from whatever mode it was in
 - [x] Locks onto a picture already under way (no start tones needed)
-- [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
-      CAT with a watchdog; sent pictures are listed with the received ones
+- [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates. The app keys
+      the radio (CAT, RTS or DTR) and a watchdog unkeys it, and keeps retrying if the radio
+      won't let go. Sent pictures are listed with the received ones
 - [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
 - [x] Report a bug: About menu → Report a bug opens a GitHub issue with version, system and radio filled in (no pictures or callsign)
 - [x] Yaesu FT-991A, FT-991, FT-891 and FTDX10 are recognised by name (same CAT as the FT-710; commands checked against Yaesu's manuals, not yet tried on the radios)
@@ -70,7 +72,9 @@ download matches the manifest.
   renames, then reopened.
 - **Windows:** each file is renamed to `*.old` and the new one put in its place (Windows
   can rename a running .exe but not overwrite it); the new version takes over the same
-  window and the page reloads.
+  window and the page reloads. The update writes down which `.old` files it made, and the
+  next start removes exactly those, plus any abandoned `.sstv-update-<number>` download
+  folder more than an hour old. Nothing else in the folder is deleted.
 
 Development builds (`dev`) never update themselves.
 
