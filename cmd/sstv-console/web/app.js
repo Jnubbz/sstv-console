@@ -237,7 +237,7 @@ function syncRigKind() {
   $("port-field").hidden = generic && vox;
   $("rig-help").textContent = generic
     ? "No CAT needed. Your radio is keyed by a serial line (RTS or DTR, as on a DigiRig or similar interface) or by VOX. You set the frequency on the radio yourself; the band buttons just note which band you're on and show what to set."
-    : "Shows the radio's frequency, labels each picture with it, and switches bands for you. Optional for receiving.";
+    : "Shows the radio's frequency, labels each picture with it, and switches bands for you. Optional for receiving. Pick the radio's CAT port (on an FT-710, FT-991A or FTDX10 that's the Enhanced port) and the speed set in its CAT RATE menu.";
 }
 $("rig-kind").addEventListener("change", syncRigKind);
 $("rig-ptt").addEventListener("change", syncRigKind);

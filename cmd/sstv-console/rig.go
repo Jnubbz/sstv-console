@@ -95,12 +95,9 @@ func (r *rigConn) connectWith(o rigOpts) error {
 	id, err := p.Ask("ID;")
 	if err != nil {
 		p.Close()
-		return fail(fmt.Errorf("no answer from a radio on that port at %d baud. Check it's the radio's CAT port (the Enhanced port on an FT-710) and that the radio's CAT RATE matches", baud))
+		return fail(fmt.Errorf("no answer from a radio on that port at %d baud. Check it's the radio's CAT port (the Enhanced port on an FT-710, FT-991A or FTDX10) and that the radio's CAT RATE matches", baud))
 	}
-	model := "Yaesu radio (" + strings.TrimSuffix(id, ";") + ")"
-	if id == ft710.ID {
-		model = "FT-710"
-	}
+	model := yaesuModel(id)
 	r.mu.Lock()
 	r.port = p
 	r.kind, r.line = "yaesu", ""
@@ -316,4 +313,22 @@ func (r *rigConn) tune(band string) error {
 		return fmt.Errorf("the radio is on %s but didn't switch to %s (it shows %s)", band, want, st.Mode)
 	}
 	return nil
+}
+
+// yaesuModels are the radios whose "ID;" answer is confirmed in Yaesu's CAT manuals. They all
+// speak the same text CAT (FA, MD0, TX1/TX0) with DATA-USB = C and DATA-LSB = 8, so one driver
+// covers them. Any other Yaesu that answers "ID;" is tried the same way and named by its code.
+var yaesuModels = map[string]string{
+	"ID0800;": "FT-710",
+	"ID0670;": "FT-991A",
+	"ID0570;": "FT-991",
+	"ID0650;": "FT-891",
+	"ID0761;": "FTDX10",
+}
+
+func yaesuModel(id string) string {
+	if m, ok := yaesuModels[id]; ok {
+		return m
+	}
+	return "Yaesu radio (" + strings.TrimSuffix(id, ";") + ")"
 }

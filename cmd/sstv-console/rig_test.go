@@ -390,3 +390,23 @@ func TestGenericRadioKeysDuringATransmission(t *testing.T) {
 		t.Fatalf("still keyed after the watchdog: rts %v", lp.rts)
 	}
 }
+
+func TestYaesuModelsAreNamedAndOthersStillWork(t *testing.T) {
+	for id, want := range map[string]string{
+		"ID0800;": "FT-710", "ID0670;": "FT-991A", "ID0570;": "FT-991", "ID0650;": "FT-891", "ID0761;": "FTDX10",
+		"ID0244;": "Yaesu radio (ID0244)",
+	} {
+		radio := &fakeRadio{answers: map[string]string{"ID;": id, "FA;": "FA014230000;", "MD0;": "MD0C;"}}
+		r := &rigConn{open: func(string, int) (catPort, error) { return radio, nil }}
+		if err := r.connect("p", 38400); err != nil {
+			t.Fatal(id, err)
+		}
+		if got := r.status().Model; got != want {
+			t.Errorf("%s: model %q, want %q", id, got, want)
+		}
+		if st := r.status(); st.FreqHz != 14230000 || st.Mode != "DATA-U" {
+			t.Errorf("%s: freq %d mode %q", id, st.FreqHz, st.Mode)
+		}
+		r.disconnect()
+	}
+}

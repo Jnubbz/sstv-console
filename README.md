@@ -44,7 +44,8 @@ Early days. In place now:
       CAT with a watchdog; sent pictures are listed with the received ones
 - [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
 - [x] Report a bug: About menu → Report a bug opens a GitHub issue with version, system and radio filled in (no pictures or callsign)
-- [ ] CAT drivers for more radios: other Yaesus (FT-991A and similar, to be tried), Icom CI-V, Kenwood/Elecraft, and a Hamlib `rigctld` bridge
+- [x] Yaesu FT-991A, FT-991, FT-891 and FTDX10 are recognised by name (same CAT as the FT-710; commands checked against Yaesu's manuals, not yet tried on the radios)
+- [ ] CAT drivers for more radios: Icom CI-V, Kenwood/Elecraft, and a Hamlib `rigctld` bridge
 - [ ] PD50 / PD90 / PD160 / PD290
 
 ## How updates work
