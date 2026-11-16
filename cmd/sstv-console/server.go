@@ -82,7 +82,14 @@ func newApp(port int, quit func(), dir, picDir string) *App {
 
 // reconnect: the radio that was connected last time, if it's there.
 func (a *App) reconnect() {
-	if s := a.set.get(); s.RigPort != "" {
+	s := a.set.get()
+	if s.RigKind == "generic" {
+		if s.RigOn {
+			a.rig.connectWith(rigOpts{Kind: "generic", Port: s.RigPort, PTT: s.RigPTT})
+		}
+		return
+	}
+	if s.RigPort != "" {
 		a.rig.connect(s.RigPort, s.RigBaud)
 	}
 }
@@ -203,26 +210,49 @@ func (a *App) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/rig/connect", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Kind string `json:"kind"`
 			Port string `json:"port"`
 			Baud int    `json:"baud"`
+			PTT  string `json:"ptt"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || req.Port == "" {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		generic := req.Kind == "generic"
+		if generic && req.PTT != "rts" && req.PTT != "dtr" {
+			req.PTT, req.Port = "none", "" // VOX: no port to open
+		}
+		if req.Port == "" && !(generic && req.PTT == "none") {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pick a port"})
 			return
 		}
-		known := false // only a port from the list: never an arbitrary path from the request
-		for _, p := range serial.List() {
-			known = known || p.Path == req.Port
+		if req.Port != "" {
+			known := false // only a port from the list: never an arbitrary path from the request
+			for _, p := range serial.List() {
+				known = known || p.Path == req.Port
+			}
+			if !known {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "that port isn't there any more"})
+				return
+			}
 		}
-		if !known {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "that port isn't there any more"})
-			return
+		kind := "yaesu"
+		if generic {
+			kind = "generic"
 		}
-		if err := a.rig.connect(req.Port, req.Baud); err != nil {
+		if err := a.rig.connectWith(rigOpts{Kind: kind, Port: req.Port, Baud: req.Baud, PTT: req.PTT}); err != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
-		a.set.update(func(s *Settings) { s.RigPort, s.RigBaud = req.Port, req.Baud })
+		a.set.update(func(s *Settings) {
+			s.RigKind, s.RigPort, s.RigOn = kind, req.Port, true
+			if generic {
+				s.RigPTT = req.PTT
+			} else {
+				s.RigBaud = req.Baud
+			}
+		})
 		writeJSON(w, http.StatusOK, a.status())
 	})
 	mux.HandleFunc("POST /api/rig/tune", func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +272,7 @@ func (a *App) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/rig/disconnect", func(w http.ResponseWriter, r *http.Request) {
 		a.rig.disconnect()
-		a.set.update(func(s *Settings) { s.RigPort = "" })
+		a.set.update(func(s *Settings) { s.RigPort, s.RigOn = "", false })
 		writeJSON(w, http.StatusOK, a.status())
 	})
 	mux.HandleFunc("POST /api/settings/audio", func(w http.ResponseWriter, r *http.Request) {

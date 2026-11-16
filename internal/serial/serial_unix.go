@@ -61,6 +61,18 @@ func (p *Port) read(buf []byte) (int, error) { // returns after 0.1 s without da
 	return max(n, 0), nil
 }
 
+// SetRTS and SetDTR raise or drop a control line: the push-to-talk on a simple interface.
+func (p *Port) SetRTS(on bool) error { return p.line(tiocmRTS, on) }
+func (p *Port) SetDTR(on bool) error { return p.line(tiocmDTR, on) }
+
+func (p *Port) line(bit int32, on bool) error {
+	req := uintptr(tiocmBIC)
+	if on {
+		req = uintptr(tiocmBIS)
+	}
+	return ioctlInt(p.fd, req, bit)
+}
+
 // Close drops both lines and closes the port.
 func (p *Port) Close() {
 	if p.fd >= 0 {

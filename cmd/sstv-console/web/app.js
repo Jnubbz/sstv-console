@@ -130,8 +130,11 @@ function renderRadio(s) {
       el.title = `${mhz(b.freqHz)} ${b.lower ? "DATA-L" : "DATA-U"}`;
       el.addEventListener("click", async () => {
         $("band-msg").textContent = "";
-        try { render(await api("/api/rig/tune", "POST", { band: b.name })); }
-        catch (e) { $("band-msg").textContent = e.message; }
+        try {
+          const r = await api("/api/rig/tune", "POST", { band: b.name });
+          render(r);
+          if (r.rig.manual) { $("band-msg").className = "small muted"; $("band-msg").textContent = `Set your radio to ${(b.freqHz / 1e6).toFixed(3)} MHz, ${b.lower ? "lower" : "upper"} sideband (its DATA mode, if it has one).`; }
+        } catch (e) { $("band-msg").className = "small err"; $("band-msg").textContent = e.message; }
       });
       bands.append(el);
     }
@@ -160,7 +163,7 @@ function renderRadio(s) {
   else if (rx.recorded) $("rec-msg").textContent = "Saved: " + rx.recorded;
   renderStation(s);
   $("rig-btn").textContent = rig.connected ? "Disconnect" : "Connect";
-  if (rig.connected) { $("rig-msg").className = "small " + (rig.error ? "err" : "muted"); $("rig-msg").textContent = rig.error || `Connected to the ${rig.model}.`; }
+  if (rig.connected) { $("rig-msg").className = "small " + (rig.error ? "err" : "muted"); $("rig-msg").textContent = rig.error || (rig.manual ? `${rig.model}. You set the frequency on the radio; the band buttons note which band you're on.` : `Connected to the ${rig.model}.`); }
 
   // start the saved input once (the Mac asks for the microphone the first time)
   if (!audioWanted) {
@@ -208,8 +211,24 @@ async function loadPorts(s) {
     b.replaceChildren();
     for (const x of p.bauds) b.add(new Option(String(x), String(x)));
     b.value = String(s.rig.baud || s.settings.rigBaud || 38400);
+    $("rig-kind").value = s.settings.rigKind || "yaesu";
+    $("rig-ptt").value = s.settings.rigPTT || "rts";
+    syncRigKind();
   } catch { portsLoaded = false; }
 }
+
+// The Radio panel shows what the chosen kind of radio needs.
+function syncRigKind() {
+  const generic = $("rig-kind").value === "generic", vox = $("rig-ptt").value === "none";
+  $("ptt-field").hidden = !generic;
+  $("baud-field").hidden = generic;
+  $("port-field").hidden = generic && vox;
+  $("rig-help").textContent = generic
+    ? "No CAT needed. Your radio is keyed by a serial line (RTS or DTR, as on a DigiRig or similar interface) or by VOX. You set the frequency on the radio yourself; the band buttons just note which band you're on and show what to set."
+    : "Shows the radio's frequency, labels each picture with it, and switches bands for you. Optional for receiving.";
+}
+$("rig-kind").addEventListener("change", syncRigKind);
+$("rig-ptt").addEventListener("change", syncRigKind);
 
 async function listInputs(keep) {
   const all = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications");
@@ -295,9 +314,13 @@ $("rig-btn").addEventListener("click", async () => {
   const msg = $("rig-msg");
   $("rig-btn").disabled = true;
   try {
-    if (!(last && last.rig.connected) && !$("rig-port").value) throw new Error("No serial port found. Plug in the radio's USB cable, then close and reopen this panel.");
+    const generic = $("rig-kind").value === "generic", vox = generic && $("rig-ptt").value === "none";
+    if (!(last && last.rig.connected) && !vox && !$("rig-port").value) throw new Error("No serial port found. Plug in the radio's USB cable, then close and reopen this panel.");
     if (last && last.rig.connected) { render(await api("/api/rig/disconnect", "POST")); msg.textContent = ""; }
-    else { msg.className = "small muted"; msg.textContent = "Connecting…"; render(await api("/api/rig/connect", "POST", { port: $("rig-port").value, baud: Number($("rig-baud").value) })); }
+    else {
+      msg.className = "small muted"; msg.textContent = "Connecting…";
+      render(await api("/api/rig/connect", "POST", { kind: $("rig-kind").value, ptt: $("rig-ptt").value, port: vox ? "" : $("rig-port").value, baud: Number($("rig-baud").value) }));
+    }
   } catch (e) { msg.className = "small err"; msg.textContent = e.message; }
   $("rig-btn").disabled = false;
 });

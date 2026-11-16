@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -288,5 +289,104 @@ func TestOldPicturesCountAsSaved(t *testing.T) {
 	rx := newReceiver(dir, pics, func() int { return 0 })
 	if l := rx.pictures(); len(l) != 1 || l[0].ID != "old" || !l[0].Saved {
 		t.Fatalf("%+v", l)
+	}
+}
+
+// A port with no radio behind it, only control lines: what a simple keying interface is.
+type linePort struct {
+	rts, dtr bool
+	log      []string
+	closed   bool
+}
+
+func (l *linePort) Ask(string) (string, error) { return "", errors.New("no CAT here") }
+func (l *linePort) Write(string) error         { return errors.New("no CAT here") }
+func (l *linePort) Close()                     { l.closed = true; l.rts, l.dtr = false, false }
+func (l *linePort) SetRTS(on bool) error {
+	l.rts = on
+	l.log = append(l.log, fmt.Sprint("rts ", on))
+	return nil
+}
+func (l *linePort) SetDTR(on bool) error {
+	l.dtr = on
+	l.log = append(l.log, fmt.Sprint("dtr ", on))
+	return nil
+}
+
+// Any radio: no CAT, keyed by RTS or DTR, the frequency is the band that was picked.
+func TestGenericRadioKeysWithALine(t *testing.T) {
+	for _, line := range []string{"rts", "dtr"} {
+		lp := &linePort{}
+		r := newRig()
+		r.open = func(string, int) (catPort, error) { return lp, nil }
+		if err := r.connectWith(rigOpts{Kind: "generic", Port: "COM7", PTT: line}); err != nil {
+			t.Fatal(line, err)
+		}
+		st := r.status()
+		if !st.Connected || !st.Manual || st.Kind != "generic" || st.FreqHz != 0 || !strings.Contains(st.Model, strings.ToUpper(line)) {
+			t.Fatalf("%s status %+v", line, st)
+		}
+		if lp.rts || lp.dtr {
+			t.Fatal("a line was up before any transmission")
+		}
+		if err := r.tune("20m"); err != nil || r.status().FreqHz != 14230000 { // noted, not sent: no CAT
+			t.Fatalf("tune: %v, %+v", err, r.status())
+		}
+		if len(lp.log) != 0 {
+			t.Fatalf("tuning touched the lines: %v", lp.log)
+		}
+		if err := r.ptt(true); err != nil || (line == "rts") != lp.rts || (line == "dtr") != lp.dtr {
+			t.Fatalf("%s key: rts %v dtr %v, %v", line, lp.rts, lp.dtr, err)
+		}
+		if err := r.ptt(false); err != nil || lp.rts || lp.dtr {
+			t.Fatalf("%s unkey: rts %v dtr %v, %v", line, lp.rts, lp.dtr, err)
+		}
+		r.ptt(true)
+		r.disconnect() // closing the port drops the line, even if a transmission was in progress
+		if !lp.closed || lp.rts || lp.dtr || r.status().Connected {
+			t.Fatalf("after disconnect: %+v closed %v rts %v", r.status(), lp.closed, lp.rts)
+		}
+	}
+}
+
+// VOX: no port at all. The radio counts as connected (band buttons, Tune), keying does nothing.
+func TestGenericRadioVOX(t *testing.T) {
+	r := newRig()
+	r.open = func(string, int) (catPort, error) { t.Fatal("opened a port for VOX"); return nil, nil }
+	if err := r.connectWith(rigOpts{Kind: "generic", PTT: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if st := r.status(); !st.Connected || st.Port != "" || !strings.Contains(st.Model, "VOX") {
+		t.Fatalf("%+v", st)
+	}
+	if r.ptt(true) != nil || r.ptt(false) != nil {
+		t.Fatal("VOX keying should do nothing, quietly")
+	}
+	if err := r.connectWith(rigOpts{Kind: "generic", PTT: "rts"}); err == nil {
+		t.Fatal("RTS keying with no port")
+	}
+}
+
+// A whole transmission keys the line and lets it go again, through the same path as CAT radios.
+func TestGenericRadioKeysDuringATransmission(t *testing.T) {
+	a := newApp(7380, func() {}, t.TempDir(), t.TempDir())
+	lp := &linePort{}
+	a.rig.open = func(string, int) (catPort, error) { return lp, nil }
+	if err := a.rig.connectWith(rigOpts{Kind: "generic", Port: "port", PTT: "rts"}); err != nil {
+		t.Fatal(err)
+	}
+	var fire func()
+	a.tx.after = func(d time.Duration, f func()) *time.Timer { fire = f; return time.NewTimer(time.Hour) }
+	id, secs, err := a.tx.prepareTune()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.tx.key(id); err != nil || !lp.rts {
+		t.Fatalf("key: %v, rts %v", err, lp.rts)
+	}
+	a.tx.since = time.Now().Add(-time.Duration(secs * float64(time.Second)))
+	fire()
+	if lp.rts || a.tx.isKeyed() {
+		t.Fatalf("still keyed after the watchdog: rts %v", lp.rts)
 	}
 }

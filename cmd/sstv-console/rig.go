@@ -20,6 +20,8 @@ type rigStatus struct {
 	Port      string `json:"port,omitempty"`
 	Baud      int    `json:"baud,omitempty"`
 	Model     string `json:"model,omitempty"`
+	Kind      string `json:"kind,omitempty"`   // "yaesu" or "generic"
+	Manual    bool   `json:"manual,omitempty"` // no CAT: the frequency is the band last picked, not read from the radio
 	FreqHz    int    `json:"freqHz,omitempty"`
 	Mode      string `json:"mode,omitempty"`
 	Error     string `json:"error,omitempty"`
@@ -32,10 +34,28 @@ type catPort interface {
 	Close()
 }
 
+// lineSetter: a port that can raise and drop RTS and DTR (push-to-talk for a radio with no CAT).
+type lineSetter interface {
+	SetRTS(on bool) error
+	SetDTR(on bool) error
+}
+
+// rigOpts says how to connect. Kind "yaesu" talks Yaesu CAT (frequency, mode, band buttons,
+// CAT keying). Kind "generic" is any other radio: no CAT, keyed by RTS or DTR on a serial
+// port (or by VOX, with no port at all), and the frequency is whatever band was picked.
+type rigOpts struct {
+	Kind string
+	Port string
+	Baud int
+	PTT  string // generic: "rts", "dtr" or "none"
+}
+
 type rigConn struct {
 	io   sync.Mutex // one conversation with the radio at a time (never held with mu)
 	mu   sync.Mutex
 	port catPort
+	kind string // "yaesu" or "generic" while connected
+	line string // generic: the line that keys it ("rts", "dtr" or "none")
 	st   rigStatus
 	gen  int // bumps on every connect/disconnect: stops the old poller
 	open func(path string, baud int) (catPort, error)
@@ -51,8 +71,16 @@ func (r *rigConn) status() rigStatus {
 	return r.st
 }
 
-// connect opens the port and checks a radio answers. It replaces any connection.
+// connect opens the port and checks a Yaesu radio answers. It replaces any connection.
 func (r *rigConn) connect(path string, baud int) error {
+	return r.connectWith(rigOpts{Kind: "yaesu", Port: path, Baud: baud})
+}
+
+func (r *rigConn) connectWith(o rigOpts) error {
+	if o.Kind == "generic" {
+		return r.connectGeneric(o)
+	}
+	path, baud := o.Port, o.Baud
 	r.disconnect()
 	fail := func(err error) error {
 		r.mu.Lock()
@@ -75,9 +103,10 @@ func (r *rigConn) connect(path string, baud int) error {
 	}
 	r.mu.Lock()
 	r.port = p
+	r.kind, r.line = "yaesu", ""
 	r.gen++
 	gen := r.gen
-	r.st = rigStatus{Connected: true, Port: path, Baud: baud, Model: model}
+	r.st = rigStatus{Connected: true, Port: path, Baud: baud, Model: model, Kind: "yaesu"}
 	r.mu.Unlock()
 	r.poll(gen) // once now, so the frequency is there when connect returns
 	go func() {
@@ -88,6 +117,40 @@ func (r *rigConn) connect(path string, baud int) error {
 			}
 		}
 	}()
+	return nil
+}
+
+// connectGeneric "connects" a radio with no CAT: it opens the serial port that keys it
+// (RTS or DTR, both held low until a transmission), or none at all for VOX.
+func (r *rigConn) connectGeneric(o rigOpts) error {
+	r.disconnect()
+	if o.PTT != "rts" && o.PTT != "dtr" {
+		o.PTT = "none"
+	}
+	var p catPort
+	model := "Other radio (VOX)"
+	if o.PTT != "none" {
+		if o.Port == "" {
+			return fmt.Errorf("pick the serial port that keys the radio")
+		}
+		var err error
+		if p, err = r.open(o.Port, 9600); err != nil {
+			r.mu.Lock()
+			r.st = rigStatus{Port: o.Port, Error: err.Error()}
+			r.mu.Unlock()
+			return err
+		}
+		if _, ok := p.(lineSetter); !ok {
+			p.Close()
+			return fmt.Errorf("that port can't be used to key a radio")
+		}
+		model = "Other radio (keyed by " + strings.ToUpper(o.PTT) + ")"
+	}
+	r.mu.Lock()
+	r.port, r.kind, r.line = p, "generic", o.PTT
+	r.gen++
+	r.st = rigStatus{Connected: true, Port: o.Port, Model: model, Kind: "generic", Manual: true}
+	r.mu.Unlock()
 	return nil
 }
 
@@ -142,9 +205,10 @@ func (r *rigConn) disconnect() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.port != nil {
-		r.port.Close()
+		r.port.Close() // drops RTS and DTR first
 		r.port = nil
 	}
+	r.kind, r.line = "", ""
 	r.st = rigStatus{}
 }
 
@@ -153,8 +217,18 @@ func (r *rigConn) ptt(on bool) error {
 	r.io.Lock()
 	defer r.io.Unlock()
 	r.mu.Lock()
-	p := r.port
+	p, kind, line := r.port, r.kind, r.line
 	r.mu.Unlock()
+	if kind == "generic" {
+		ls, ok := p.(lineSetter)
+		if !ok { // VOX: the audio itself keys the radio
+			return nil
+		}
+		if line == "dtr" {
+			return ls.SetDTR(on)
+		}
+		return ls.SetRTS(on)
+	}
 	if p == nil {
 		return fmt.Errorf("the radio isn't connected")
 	}
@@ -195,6 +269,13 @@ func (r *rigConn) tune(band string) error {
 	if b == nil {
 		return fmt.Errorf("no SSTV frequency for %q", band)
 	}
+	r.mu.Lock()
+	if r.kind == "generic" { // no CAT to command: note the band, the operator sets the radio
+		r.st.FreqHz = b.FreqHz
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
 	r.io.Lock()
 	r.mu.Lock()
 	p, gen := r.port, r.gen

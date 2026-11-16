@@ -39,7 +39,9 @@ const (
 	genericWrite     = 0x40000000
 	openExisting     = 3
 	invalidHandle    = ^uintptr(0)
+	escSETRTS        = 3
 	escCLRRTS        = 4
+	escSETDTR        = 5
 	escCLRDTR        = 6
 )
 
@@ -128,6 +130,21 @@ func (p *Port) read(buf []byte) (int, error) {
 		return 0, err
 	}
 	return int(n), nil
+}
+
+// SetRTS and SetDTR raise or drop a control line: the push-to-talk on a simple interface.
+func (p *Port) SetRTS(on bool) error { return p.escape(on, escSETRTS, escCLRRTS) }
+func (p *Port) SetDTR(on bool) error { return p.escape(on, escSETDTR, escCLRDTR) }
+
+func (p *Port) escape(on bool, set, clr uintptr) error {
+	f := clr
+	if on {
+		f = set
+	}
+	if r, _, e := pEscapeCommFunction.Call(uintptr(p.h), f); r == 0 {
+		return e
+	}
+	return nil
 }
 
 // Close drops both lines and closes the port.

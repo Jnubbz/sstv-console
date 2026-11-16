@@ -66,13 +66,28 @@
     </div>
   </div>
   <div class="radio-card">
-    <h2>2. Radio control (CAT)</h2>
-    <p class="muted small">Shows the radio's frequency and labels each picture with it. Optional for receiving.</p>
+    <h2>2. Radio control</h2>
+    <p id="rig-help" class="muted small"></p>
     <div class="row">
-      <label class="field grow">Port
+      <label class="field grow">Radio
+        <select id="rig-kind">
+          <option value="yaesu">Yaesu (FT-710, FT-991A and similar): full control</option>
+          <option value="generic">Any other radio: keyed by a serial line or VOX</option>
+        </select>
+      </label>
+      <label class="field" id="ptt-field" hidden>Key it with
+        <select id="rig-ptt">
+          <option value="rts">RTS line</option>
+          <option value="dtr">DTR line</option>
+          <option value="none">VOX (no cable)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="field grow" id="port-field">Port
         <select id="rig-port"></select>
       </label>
-      <label class="field">Speed
+      <label class="field" id="baud-field">Speed
         <select id="rig-baud"></select>
       </label>
       <button id="rig-btn" class="btn btn-primary">Connect</button>

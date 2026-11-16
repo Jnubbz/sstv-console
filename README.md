@@ -30,6 +30,9 @@ Early days. In place now:
       PD120/180/240, with header (VIS) detection, off-tune correction and slant correction.
       `cmd/sstv-file` runs it on WAV files
 - [x] Radio panel: pick the radio's sound input, connect CAT (frequency and mode in the top bar)
+- [x] Any radio: no CAT needed. Key it with RTS or DTR on a serial port (a DigiRig or similar), or by VOX;
+      you set the frequency yourself and the band buttons note the band. Yaesu radios with the
+      FT-710's CAT dialect get full control (frequency, mode, band buttons, keying)
 - [x] Live receive: waterfall, the picture as it arrives, finished pictures listed in the
       app. Nothing is written to your Pictures folder until you press Save (then it goes
       to `Pictures/SSTV Console`); Delete throws one away, and pictures you never save or
@@ -40,6 +43,7 @@ Early days. In place now:
 - [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
       CAT with a watchdog; sent pictures are listed with the received ones
 - [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
+- [ ] CAT drivers for more radios: other Yaesus (FT-991A and similar, to be tried), Icom CI-V, Kenwood/Elecraft, and a Hamlib `rigctld` bridge
 - [ ] PD50 / PD90 / PD160 / PD290
 
 ## How updates work
