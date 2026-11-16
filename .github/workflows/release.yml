@@ -47,4 +47,5 @@ jobs:
         run: |
           gh release create "v$VERSION" dist/SSTV-Console-Mac.zip dist/SSTV-Console-Windows.zip \
             dist/latest.json dist/latest.json.sig \
-            --title "SSTV Console $VERSION" --generate-notes --latest
+            --title "SSTV Console $VERSION" --generate-notes --latest \
+            --notes "**First time? Your computer will show a warning because the app isn't registered with Apple or Microsoft (paid programs); it is not a malware finding. Step-by-step: [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/main/docs/INSTALL.md). What the app does and how to check it: [SECURITY.md](https://github.com/${{ github.repository }}/blob/main/SECURITY.md).**"

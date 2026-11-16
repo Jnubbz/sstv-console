@@ -13,12 +13,19 @@ app updates itself.
 
 ## Install
 
-- **Mac (Apple Silicon):** unzip `SSTV-Console-Mac.zip`, drag *SSTV Console.app* to
-  Applications, and the first time right-click it and choose Open.
-- **Windows:** unzip `SSTV-Console-Windows.zip` somewhere you can write to (Documents or
-  the Desktop, not Program Files) and run `SSTV-Console.exe`.
+Your computer will warn you the first time, because the app isn't yet registered with Apple
+or Microsoft (that costs money; it isn't a finding about the code). It's a one-time step.
 
-That's the only manual install: after that, the app updates itself.
+- **Mac (Apple Silicon):** unzip `SSTV-Console-Mac.zip`, drag *SSTV Console.app* to
+  Applications and open it. When macOS says it "could not verify" the app, click Done, then go to
+  System Settings → Privacy & Security, scroll to Security and click **Open Anyway**.
+- **Windows:** unzip `SSTV-Console-Windows.zip` somewhere you can write to (Documents or
+  the Desktop, not Program Files) and run `SSTV-Console.exe`. At *Windows protected your PC*,
+  click **More info**, then **Run anyway**.
+
+Step-by-step with what each message means: **[docs/INSTALL.md](docs/INSTALL.md)**.
+What the app does, how to check your download, and where to read the code:
+**[SECURITY.md](SECURITY.md)**. After that the app updates itself.
 
 ## Status
 
@@ -45,7 +52,8 @@ Early days. In place now:
 - [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
 - [x] Report a bug: About menu → Report a bug opens a GitHub issue with version, system and radio filled in (no pictures or callsign)
 - [x] Yaesu FT-991A, FT-991, FT-891 and FTDX10 are recognised by name (same CAT as the FT-710; commands checked against Yaesu's manuals, not yet tried on the radios)
-- [ ] CAT drivers for more radios: Icom CI-V, Kenwood/Elecraft, and a Hamlib `rigctld` bridge
+- [x] Hamlib bridge: any radio Hamlib supports, through `rigctld` (frequency, band buttons that set the data mode, keying)
+- [ ] Built-in drivers for Icom CI-V and Kenwood/Elecraft (so Hamlib isn't needed)
 - [ ] PD50 / PD90 / PD160 / PD290
 
 ## How updates work
