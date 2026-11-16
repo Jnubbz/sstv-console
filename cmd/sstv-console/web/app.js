@@ -30,6 +30,18 @@ function render(s) {
   if (current === null) current = s.version;
   $("version").textContent = s.version === "dev" ? "(development build)" : s.version;
 
+  // "Report a bug" opens a GitHub issue with the details we always ask for already filled in.
+  // Nothing personal goes in it: no callsign, no pictures, just version, system and radio setup.
+  const os = /Windows/.test(navigator.userAgent) ? "Windows" : /Mac/.test(navigator.userAgent) ? "Mac" : "Other";
+  const rigLine = s.rig.connected ? `${s.rig.model || "radio"} (${s.rig.kind || "yaesu"})` : "not connected";
+  const body = [
+    "**What happened?**", "", "", "**What did you expect?**", "", "", "**Steps to repeat it**", "", "",
+    "---", "_Filled in automatically:_",
+    `- SSTV Console ${s.version}`, `- System: ${os}`, `- Radio: ${rigLine}`,
+    `- Audio: ${s.rx.audio ? "receiving" : "no audio"}`,
+  ].join("\n");
+  $("report-bug").href = "https://github.com/Jnubbz/sstv-console/issues/new?labels=bug&body=" + encodeURIComponent(body);
+
   // the menu's one-line summary
   let line = "";
   if (s.version === "dev") line = "Development build: it doesn't update itself.";

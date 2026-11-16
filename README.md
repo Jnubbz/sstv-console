@@ -43,6 +43,7 @@ Early days. In place now:
 - [x] Transmit: compose a picture on your photo with CQ / reply / 73 templates, keyed over
       CAT with a watchdog; sent pictures are listed with the received ones
 - [ ] Conversation threads per station, with the callsign read from the picture or FSK ID
+- [x] Report a bug: About menu → Report a bug opens a GitHub issue with version, system and radio filled in (no pictures or callsign)
 - [ ] CAT drivers for more radios: other Yaesus (FT-991A and similar, to be tried), Icom CI-V, Kenwood/Elecraft, and a Hamlib `rigctld` bridge
 - [ ] PD50 / PD90 / PD160 / PD290
 
