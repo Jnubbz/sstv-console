@@ -224,6 +224,7 @@ async function loadPorts(s) {
     for (const x of p.bauds) b.add(new Option(String(x), String(x)));
     b.value = String(s.rig.baud || s.settings.rigBaud || 38400);
     $("rig-kind").value = s.settings.rigKind || "yaesu";
+    if (s.settings.rigAddr) $("rig-addr").value = s.settings.rigAddr;
     $("rig-ptt").value = s.settings.rigPTT || "rts";
     syncRigKind();
   } catch { portsLoaded = false; }
@@ -231,11 +232,15 @@ async function loadPorts(s) {
 
 // The Radio panel shows what the chosen kind of radio needs.
 function syncRigKind() {
-  const generic = $("rig-kind").value === "generic", vox = $("rig-ptt").value === "none";
+  const kind = $("rig-kind").value, generic = kind === "generic", hamlib = kind === "hamlib", vox = $("rig-ptt").value === "none";
   $("ptt-field").hidden = !generic;
-  $("baud-field").hidden = generic;
-  $("port-field").hidden = generic && vox;
-  $("rig-help").textContent = generic
+  $("baud-field").hidden = generic || hamlib;
+  $("port-field").hidden = hamlib || (generic && vox);
+  $("addr-field").hidden = !hamlib;
+  $("hamlib-help").hidden = !hamlib;
+  $("rig-help").textContent = hamlib
+    ? "For radios beyond the Yaesus above: Hamlib talks to the radio and SSTV Console talks to Hamlib (rigctld). You get the frequency, band buttons that set the data mode, and keying, same as a Yaesu."
+    : generic
     ? "No CAT needed. Your radio is keyed by a serial line (RTS or DTR, as on a DigiRig or similar interface) or by VOX. You set the frequency on the radio yourself; the band buttons just note which band you're on and show what to set."
     : "Shows the radio's frequency, labels each picture with it, and switches bands for you. Optional for receiving. Pick the radio's CAT port (on an FT-710, FT-991A or FTDX10 that's the Enhanced port) and the speed set in its CAT RATE menu.";
 }
@@ -326,12 +331,13 @@ $("rig-btn").addEventListener("click", async () => {
   const msg = $("rig-msg");
   $("rig-btn").disabled = true;
   try {
+    const hamlib = $("rig-kind").value === "hamlib";
     const generic = $("rig-kind").value === "generic", vox = generic && $("rig-ptt").value === "none";
-    if (!(last && last.rig.connected) && !vox && !$("rig-port").value) throw new Error("No serial port found. Plug in the radio's USB cable, then close and reopen this panel.");
+    if (!(last && last.rig.connected) && !vox && !hamlib && !$("rig-port").value) throw new Error("No serial port found. Plug in the radio's USB cable, then close and reopen this panel.");
     if (last && last.rig.connected) { render(await api("/api/rig/disconnect", "POST")); msg.textContent = ""; }
     else {
       msg.className = "small muted"; msg.textContent = "Connecting…";
-      render(await api("/api/rig/connect", "POST", { kind: $("rig-kind").value, ptt: $("rig-ptt").value, port: vox ? "" : $("rig-port").value, baud: Number($("rig-baud").value) }));
+      render(await api("/api/rig/connect", "POST", { kind: $("rig-kind").value, ptt: $("rig-ptt").value, port: vox || hamlib ? "" : $("rig-port").value, baud: Number($("rig-baud").value), addr: $("rig-addr").value }));
     }
   } catch (e) { msg.className = "small err"; msg.textContent = e.message; }
   $("rig-btn").disabled = false;

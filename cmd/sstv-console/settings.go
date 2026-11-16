@@ -13,7 +13,8 @@ type Settings struct {
 	RigBaud     int    `json:"rigBaud"`     // CAT RATE on the radio
 	RigKind     string `json:"rigKind"`     // "" or "yaesu": full CAT control; "generic": any radio, keyed by a serial line or VOX
 	RigPTT      string `json:"rigPTT"`      // generic radios: "rts", "dtr" or "none" (VOX)
-	RigOn       bool   `json:"rigOn"`       // generic radios: connect again at start
+	RigOn       bool   `json:"rigOn"`       // generic and Hamlib radios: connect again at start
+	RigAddr     string `json:"rigAddr"`     // Hamlib: where rigctld listens, host:port
 	AudioDevice string `json:"audioDevice"` // the browser's id for the sound input
 	AudioLabel  string `json:"audioLabel"`
 	OutDevice   string `json:"outDevice"` // the sound output that feeds the radio

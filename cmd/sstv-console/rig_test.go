@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -408,5 +409,86 @@ func TestYaesuModelsAreNamedAndOthersStillWork(t *testing.T) {
 			t.Errorf("%s: freq %d mode %q", id, st.FreqHz, st.Mode)
 		}
 		r.disconnect()
+	}
+}
+
+// fakeHam is a rigctld connection: a radio on a frequency in a mode, that records keying.
+type fakeHam struct {
+	mu     sync.Mutex
+	hz     int
+	mode   string
+	keyed  bool
+	closed bool
+	stuck  bool // ignores mode changes, like a radio that can't do DATA
+}
+
+func (f *fakeHam) Freq() (int, error)    { f.mu.Lock(); defer f.mu.Unlock(); return f.hz, nil }
+func (f *fakeHam) Mode() (string, error) { f.mu.Lock(); defer f.mu.Unlock(); return f.mode, nil }
+func (f *fakeHam) SetFreq(hz int) error  { f.mu.Lock(); defer f.mu.Unlock(); f.hz = hz; return nil }
+func (f *fakeHam) SetMode(m string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.stuck {
+		f.mode = m
+	}
+	return nil
+}
+func (f *fakeHam) PTT(on bool) error { f.mu.Lock(); defer f.mu.Unlock(); f.keyed = on; return nil }
+func (f *fakeHam) Close()            { f.mu.Lock(); defer f.mu.Unlock(); f.closed = true }
+
+func TestHamlibRadioReadsTunesAndKeys(t *testing.T) {
+	h := &fakeHam{hz: 7074000, mode: "CW"}
+	var asked string
+	r := &rigConn{dial: func(addr string) (hamRadio, error) { asked = addr; return h, nil }}
+	if err := r.connectWith(rigOpts{Kind: "hamlib"}); err != nil {
+		t.Fatal(err)
+	}
+	if asked != "127.0.0.1:4532" {
+		t.Errorf("dialled %q", asked)
+	}
+	if st := r.status(); !st.Connected || st.Kind != "hamlib" || st.FreqHz != 7074000 || st.Mode != "CW" || st.Manual {
+		t.Errorf("status %+v", st)
+	}
+	if err := r.tune("20m"); err != nil {
+		t.Fatal(err)
+	}
+	if st := r.status(); st.FreqHz != 14230000 || st.Mode != "DATA-U" || h.mode != "PKTUSB" {
+		t.Errorf("20m: %+v hamlib mode %s", st, h.mode)
+	}
+	if err := r.tune("40m"); err != nil || h.mode != "PKTLSB" || h.hz != 7171000 {
+		t.Errorf("40m: %v mode %s hz %d", err, h.mode, h.hz)
+	}
+	if err := r.ptt(true); err != nil || !h.keyed {
+		t.Errorf("ptt on: %v keyed %v", err, h.keyed)
+	}
+	r.ptt(false)
+	if h.keyed {
+		t.Error("still keyed")
+	}
+	r.disconnect()
+	if !h.closed || r.status().Connected {
+		t.Error("disconnect left it connected")
+	}
+}
+
+func TestHamlibRadioThatWontSwitchModeSaysSo(t *testing.T) {
+	h := &fakeHam{hz: 7074000, mode: "USB", stuck: true}
+	r := &rigConn{dial: func(string) (hamRadio, error) { return h, nil }}
+	if err := r.connectWith(rigOpts{Kind: "hamlib", Addr: "shack.local:4532"}); err != nil {
+		t.Fatal(err)
+	}
+	defer r.disconnect()
+	if err := r.tune("20m"); err == nil || !strings.Contains(err.Error(), "didn't switch") {
+		t.Errorf("tune error: %v", err)
+	}
+}
+
+func TestHamlibConnectProblemsAreClear(t *testing.T) {
+	r := &rigConn{dial: func(string) (hamRadio, error) { return nil, fmt.Errorf("connection refused") }}
+	if err := r.connectWith(rigOpts{Kind: "hamlib"}); err == nil || !strings.Contains(err.Error(), "Start it first") {
+		t.Errorf("refused: %v", err)
+	}
+	if err := r.connectWith(rigOpts{Kind: "hamlib", Addr: "http://evil/x"}); err == nil || !strings.Contains(err.Error(), "isn't an address") {
+		t.Errorf("bad address: %v", err)
 	}
 }

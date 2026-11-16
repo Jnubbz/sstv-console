@@ -73,6 +73,7 @@
       <label class="field grow">Radio
         <select id="rig-kind">
           <option value="yaesu">Yaesu (FT-710, FT-991A, FT-891, FTDX10): full control</option>
+          <option value="hamlib">Any radio Hamlib supports (through rigctld): full control</option>
           <option value="generic">Any other radio: keyed by a serial line or VOX</option>
         </select>
       </label>
@@ -85,6 +86,9 @@
       </label>
     </div>
     <div class="row">
+      <label class="field grow" id="addr-field" hidden>rigctld address
+        <input id="rig-addr" type="text" value="127.0.0.1:4532" spellcheck="false" autocomplete="off">
+      </label>
       <label class="field grow" id="port-field">Port
         <select id="rig-port"></select>
       </label>
@@ -94,6 +98,12 @@
       <button id="rig-btn" class="btn btn-primary">Connect</button>
     </div>
     <p id="rig-msg" class="small muted"></p>
+    <details id="hamlib-help" hidden>
+      <summary class="small">How to start rigctld</summary>
+      <p class="small muted">Hamlib is free software that knows several hundred radios. Install it (Mac: <code>brew install hamlib</code>; Windows: download from the Hamlib releases on GitHub), find your radio's number with <code>rigctl -l</code>, then leave this running in a terminal:</p>
+      <pre class="small">rigctld -m RADIO_NUMBER -r PORT -s SPEED -T 127.0.0.1</pre>
+      <p class="small muted">For example <code>rigctld -m 1049 -r /dev/cu.usbserial-1420 -s 38400 -T 127.0.0.1</code> (an FT-710; on Windows the port is like <code>COM5</code>). Then press Connect here. SSTV Console only sends frequency, mode and push-to-talk to it.</p>
+    </details>
   </div>
   <div class="radio-card">
     <h2>3. Transmit</h2>

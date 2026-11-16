@@ -73,7 +73,7 @@ button.rig { font: inherit; color: inherit; cursor: pointer; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .grow { flex: 1 1 180px; min-width: 0; }
-select { height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; max-width: 100%; }
+select, .field input[type=text] { height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; max-width: 100%; }
 .meter, .progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .meter div, .progress div { height: 100%; width: 0; background: var(--green); transition: width .15s; }
 .meter div.hot { background: #F87171; }
@@ -178,3 +178,7 @@ button, input, select, textarea { font-feature-settings: "zero" 1; }
 .band.tune.on { background: var(--tx); border-color: var(--tx); color: #1A1206; }
 .band:disabled { opacity: 0.4; cursor: default; }
 .tag-ok { background: rgba(92, 255, 122, 0.14); color: #7DE89A; }
+
+#hamlib-help summary { cursor: pointer; color: var(--muted); }
+#hamlib-help pre, #hamlib-help code { font-family: "Inconsolata", ui-monospace, monospace; }
+#hamlib-help pre { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--raised); overflow-x: auto; user-select: all; }

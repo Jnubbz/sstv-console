@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jnubbz/sstv-console/internal/serial"
 	"github.com/Jnubbz/sstv-console/rig/ft710"
+	"github.com/Jnubbz/sstv-console/rig/hamlib"
 )
 
 type rigStatus struct {
@@ -34,6 +35,16 @@ type catPort interface {
 	Close()
 }
 
+// hamRadio is what the rig needs of a rigctld connection (a fake one in the tests).
+type hamRadio interface {
+	Freq() (int, error)
+	Mode() (string, error)
+	SetFreq(hz int) error
+	SetMode(mode string) error
+	PTT(on bool) error
+	Close()
+}
+
 // lineSetter: a port that can raise and drop RTS and DTR (push-to-talk for a radio with no CAT).
 type lineSetter interface {
 	SetRTS(on bool) error
@@ -48,21 +59,27 @@ type rigOpts struct {
 	Port string
 	Baud int
 	PTT  string // generic: "rts", "dtr" or "none"
+	Addr string // hamlib: where rigctld listens, host:port
 }
 
 type rigConn struct {
 	io   sync.Mutex // one conversation with the radio at a time (never held with mu)
 	mu   sync.Mutex
 	port catPort
-	kind string // "yaesu" or "generic" while connected
-	line string // generic: the line that keys it ("rts", "dtr" or "none")
+	hl   hamRadio // kind "hamlib": the rigctld connection
+	kind string   // "yaesu", "generic" or "hamlib" while connected
+	line string   // generic: the line that keys it ("rts", "dtr" or "none")
 	st   rigStatus
 	gen  int // bumps on every connect/disconnect: stops the old poller
 	open func(path string, baud int) (catPort, error)
+	dial func(addr string) (hamRadio, error)
 }
 
 func newRig() *rigConn {
-	return &rigConn{open: func(path string, baud int) (catPort, error) { return serial.Open(path, baud) }}
+	return &rigConn{
+		open: func(path string, baud int) (catPort, error) { return serial.Open(path, baud) },
+		dial: func(addr string) (hamRadio, error) { return hamlib.Dial(addr) },
+	}
 }
 
 func (r *rigConn) status() rigStatus {
@@ -79,6 +96,9 @@ func (r *rigConn) connect(path string, baud int) error {
 func (r *rigConn) connectWith(o rigOpts) error {
 	if o.Kind == "generic" {
 		return r.connectGeneric(o)
+	}
+	if o.Kind == "hamlib" {
+		return r.connectHamlib(o)
 	}
 	path, baud := o.Port, o.Baud
 	r.disconnect()
@@ -151,8 +171,84 @@ func (r *rigConn) connectGeneric(o rigOpts) error {
 	return nil
 }
 
+// connectHamlib connects to a running rigctld, which does the talking to the radio.
+func (r *rigConn) connectHamlib(o rigOpts) error {
+	r.disconnect()
+	addr := o.Addr
+	if addr == "" {
+		addr = hamlib.DefaultAddr
+	}
+	fail := func(err error) error {
+		r.mu.Lock()
+		r.st = rigStatus{Kind: "hamlib", Error: err.Error()}
+		r.mu.Unlock()
+		return err
+	}
+	if !hamlib.ValidAddr(addr) {
+		return fail(fmt.Errorf("%q isn't an address like 127.0.0.1:4532", addr))
+	}
+	h, err := r.dial(addr)
+	if err != nil {
+		return fail(fmt.Errorf("can't reach rigctld at %s. Start it first (the Radio panel shows how), then connect", addr))
+	}
+	if _, err := h.Freq(); err != nil {
+		h.Close()
+		return fail(fmt.Errorf("rigctld is running but the radio didn't answer: %v", err))
+	}
+	r.mu.Lock()
+	r.hl, r.kind, r.line = h, "hamlib", ""
+	r.gen++
+	gen := r.gen
+	r.st = rigStatus{Connected: true, Port: addr, Model: "Radio via Hamlib (" + addr + ")", Kind: "hamlib"}
+	r.mu.Unlock()
+	r.poll(gen)
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			if !r.poll(gen) {
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+// pollHamlib is poll for a rigctld connection.
+func (r *rigConn) pollHamlib(gen int) bool {
+	r.io.Lock()
+	defer r.io.Unlock()
+	r.mu.Lock()
+	h := r.hl
+	if r.gen != gen || h == nil {
+		r.mu.Unlock()
+		return false
+	}
+	r.mu.Unlock()
+	hz, err1 := h.Freq()
+	md, err2 := h.Mode()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gen != gen {
+		return false
+	}
+	if err1 != nil || err2 != nil {
+		r.st.Error = "The radio stopped answering (is it on, and is rigctld still running?)"
+		r.st.FreqHz, r.st.Mode = 0, ""
+		return true
+	}
+	r.st.Error = ""
+	r.st.FreqHz, r.st.Mode = hz, hamlib.DisplayMode(md)
+	return true
+}
+
 // poll asks frequency and mode. false: this connection is over.
 func (r *rigConn) poll(gen int) bool {
+	r.mu.Lock()
+	hl := r.hl != nil
+	r.mu.Unlock()
+	if hl {
+		return r.pollHamlib(gen)
+	}
 	r.io.Lock()
 	defer r.io.Unlock()
 	r.mu.Lock()
@@ -205,6 +301,10 @@ func (r *rigConn) disconnect() {
 		r.port.Close() // drops RTS and DTR first
 		r.port = nil
 	}
+	if r.hl != nil {
+		r.hl.Close()
+		r.hl = nil
+	}
 	r.kind, r.line = "", ""
 	r.st = rigStatus{}
 }
@@ -214,8 +314,14 @@ func (r *rigConn) ptt(on bool) error {
 	r.io.Lock()
 	defer r.io.Unlock()
 	r.mu.Lock()
-	p, kind, line := r.port, r.kind, r.line
+	p, kind, line, hl := r.port, r.kind, r.line, r.hl
 	r.mu.Unlock()
+	if kind == "hamlib" {
+		if hl == nil {
+			return fmt.Errorf("the radio isn't connected")
+		}
+		return hl.PTT(on)
+	}
 	if kind == "generic" {
 		ls, ok := p.(lineSetter)
 		if !ok { // VOX: the audio itself keys the radio
@@ -275,32 +381,45 @@ func (r *rigConn) tune(band string) error {
 	r.mu.Unlock()
 	r.io.Lock()
 	r.mu.Lock()
-	p, gen := r.port, r.gen
+	p, hl, gen := r.port, r.hl, r.gen
 	r.mu.Unlock()
-	if p == nil {
+	if p == nil && hl == nil {
 		r.io.Unlock()
 		return fmt.Errorf("the radio isn't connected")
 	}
-	mode := ft710.DATAU
-	if b.Lower {
-		mode = ft710.DATAL
-	}
-	fa, err := ft710.SetFreqA(b.FreqHz)
-	if err == nil {
-		err = p.Write(fa)
-	}
-	if err == nil {
-		var md string
-		if md, err = ft710.SetMode(mode); err == nil {
-			err = p.Write(md)
+	var want string
+	var err error
+	if hl != nil { // rigctld: Hamlib's PKTUSB / PKTLSB are the data modes
+		mode := hamlib.DataUSB
+		if b.Lower {
+			mode = hamlib.DataLSB
+		}
+		want = hamlib.DisplayMode(mode)
+		if err = hl.SetFreq(b.FreqHz); err == nil {
+			err = hl.SetMode(mode)
+		}
+	} else {
+		mode := ft710.DATAU
+		if b.Lower {
+			mode = ft710.DATAL
+		}
+		want = ft710.ModeName(mode)
+		var fa string
+		if fa, err = ft710.SetFreqA(b.FreqHz); err == nil {
+			err = p.Write(fa)
+		}
+		if err == nil {
+			var md string
+			if md, err = ft710.SetMode(mode); err == nil {
+				err = p.Write(md)
+			}
 		}
 	}
 	r.io.Unlock()
 	if err != nil {
 		return err
 	}
-	r.poll(gen) // read it back: the page shows what the radio says, not what we asked
-	want := ft710.ModeName(mode)
+	r.poll(gen)                                                     // read it back: the page shows what the radio says, not what we asked
 	if st := r.status(); st.Mode != want && st.FreqHz == b.FreqHz { // give a slow radio one more look
 		time.Sleep(150 * time.Millisecond)
 		r.poll(gen)

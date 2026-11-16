@@ -83,6 +83,12 @@ func newApp(port int, quit func(), dir, picDir string) *App {
 // reconnect: the radio that was connected last time, if it's there.
 func (a *App) reconnect() {
 	s := a.set.get()
+	if s.RigKind == "hamlib" {
+		if s.RigOn {
+			a.rig.connectWith(rigOpts{Kind: "hamlib", Addr: s.RigAddr})
+		}
+		return
+	}
 	if s.RigKind == "generic" {
 		if s.RigOn {
 			a.rig.connectWith(rigOpts{Kind: "generic", Port: s.RigPort, PTT: s.RigPTT})
@@ -214,9 +220,19 @@ func (a *App) handler() http.Handler {
 			Port string `json:"port"`
 			Baud int    `json:"baud"`
 			PTT  string `json:"ptt"`
+			Addr string `json:"addr"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if req.Kind == "hamlib" { // talks to rigctld over TCP: no serial port involved
+			if err := a.rig.connectWith(rigOpts{Kind: "hamlib", Addr: strings.TrimSpace(req.Addr)}); err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			a.set.update(func(s *Settings) { s.RigKind, s.RigAddr, s.RigOn = "hamlib", a.rig.status().Port, true })
+			writeJSON(w, http.StatusOK, a.status())
 			return
 		}
 		generic := req.Kind == "generic"
